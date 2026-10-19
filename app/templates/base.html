@@ -224,6 +224,7 @@
                     <a class="nav-item-link" href="{{ url_for('main.index') }}#team">Our team</a>
                     {% if current_user.is_authenticated %}
                         <a class="nav-item-link" href="{{ url_for('main.dashboard') }}">Dashboard</a>
+                        <a class="nav-item-link" href="{{ url_for('downloads.index') }}">Downloads</a>
                         <form method="post" action="{{ url_for('auth.logout') }}">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button class="btn-outline-custom py-2" type="submit">Sign out</button>
@@ -254,6 +255,7 @@
                     <a class="nav-item-link" @click="mobileOpen = false" href="{{ url_for('main.index') }}#team">Our team</a>
                     {% if current_user.is_authenticated %}
                         <a class="nav-item-link" href="{{ url_for('main.dashboard') }}">Dashboard</a>
+                        <a class="nav-item-link" @click="mobileOpen = false" href="{{ url_for('downloads.index') }}">Downloads</a>
                         <form method="post" action="{{ url_for('auth.logout') }}">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button class="btn-outline-custom w-100" type="submit">Sign out</button>
@@ -306,6 +308,7 @@
                     <div class="d-grid gap-2 small">
                         {% if current_user.is_authenticated %}
                             <a class="footer-link" href="{{ url_for('main.dashboard') }}">Dashboard</a>
+                            <a class="footer-link" href="{{ url_for('downloads.index') }}">Downloads</a>
                         {% else %}
                             <a class="footer-link" href="{{ url_for('auth.signin') }}">Sign in</a>
                             <a class="footer-link" href="{{ url_for('auth.signup') }}">Create account</a>
