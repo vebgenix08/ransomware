@@ -67,6 +67,8 @@ class Alert(db.Model):
     severity = db.Column(db.String(20), nullable=False, default="medium")
     risk_score = db.Column(db.Integer, nullable=False)
     acknowledged = db.Column(db.Boolean, nullable=False, default=False)
+    model_version = db.Column(db.String(80), nullable=True)
+    rule_trace = db.Column(db.JSON, nullable=True)
     created_at = db.Column(
         db.DateTime(timezone=True),
         nullable=False,
@@ -82,6 +84,8 @@ class Alert(db.Model):
             "severity": self.severity,
             "risk_score": self.risk_score,
             "acknowledged": self.acknowledged,
+            "model_version": self.model_version,
+            "rule_trace": self.rule_trace or [],
             "response": next((item.to_dict() for item in self.responses), None),
             "created_at": utc_isoformat(self.created_at),
         }
@@ -114,3 +118,88 @@ class AnalysisRun(db.Model):
         return {"id": self.id, "kind": self.kind, "status": self.status,
                 "created_at": utc_isoformat(self.created_at), "result": self.result,
                 "incident": self.alert.to_dict() if self.alert else None}
+
+
+class QuarantineItem(db.Model):
+    """One file moved to quarantine, with enough detail to restore it safely."""
+
+    __tablename__ = "quarantine_items"
+
+    id = db.Column(db.Integer, primary_key=True)
+    alert_id = db.Column(db.Integer, db.ForeignKey("alerts.id"), nullable=False, index=True)
+    original_path = db.Column(db.String(512), nullable=False)
+    quarantine_path = db.Column(db.String(512), nullable=False, unique=True)
+    sha256 = db.Column(db.String(64), nullable=False)
+    size_bytes = db.Column(db.Integer, nullable=False, default=0)
+    quarantined_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    restored_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "alert_id": self.alert_id,
+            "original_path": self.original_path,
+            "quarantine_path": self.quarantine_path,
+            "sha256": self.sha256,
+            "size_bytes": self.size_bytes,
+            "quarantined_at": utc_isoformat(self.quarantined_at),
+            "restored_at": utc_isoformat(self.restored_at) if self.restored_at else None,
+        }
+
+
+class DownloadLog(db.Model):
+    """Audit record for every authenticated release download."""
+
+    __tablename__ = "download_log"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    release_version = db.Column(db.String(50), nullable=False, default="")
+    filename = db.Column(db.String(255), nullable=False)
+    sha256 = db.Column(db.String(64), nullable=False)
+    downloaded_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), index=True
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "release_version": self.release_version,
+            "filename": self.filename,
+            "sha256": self.sha256,
+            "downloaded_at": utc_isoformat(self.downloaded_at),
+        }
+
+
+class ModelRegistry(db.Model):
+    """Version and integrity record for each model artifact actually loaded."""
+
+    __tablename__ = "model_registry"
+
+    id = db.Column(db.Integer, primary_key=True)
+    model_type = db.Column(db.String(60), nullable=False, index=True)
+    display_name = db.Column(db.String(120), nullable=False)
+    artifact_sha256 = db.Column(db.String(64), nullable=False, unique=True)
+    feature_schema = db.Column(db.JSON, nullable=False, default=list)
+    decision_threshold = db.Column(db.Float, nullable=False)
+    trained_at = db.Column(db.String(40), nullable=True)
+    metrics = db.Column(db.JSON, nullable=False, default=dict)
+    registered_at = db.Column(
+        db.DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "model_type": self.model_type,
+            "display_name": self.display_name,
+            "artifact_sha256": self.artifact_sha256,
+            "feature_schema": self.feature_schema,
+            "decision_threshold": self.decision_threshold,
+            "trained_at": self.trained_at,
+            "metrics": self.metrics,
+            "registered_at": utc_isoformat(self.registered_at),
+        }
