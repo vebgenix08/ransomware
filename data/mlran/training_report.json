@@ -1,0 +1,80 @@
+{
+  "display_name": "XGBoost \u2014 published MLRan",
+  "trained_at": "2026-10-14T05:34:17.847489+00:00",
+  "training": {
+    "source": "https://github.com/faithfulco/mlran/tree/main/6_experiments/FS_MLRan_Datasets",
+    "seed": 20261014,
+    "training_samples": 2300,
+    "test_samples": 324,
+    "original_train_samples": 3905,
+    "original_test_samples": 975,
+    "training_classes": {
+      "1": 968,
+      "0": 1332
+    },
+    "test_classes": {
+      "1": 95,
+      "0": 229
+    },
+    "train_audit": {
+      "input_samples": 3905,
+      "unique_vectors": 2303,
+      "ambiguous_vector_groups_removed": 3,
+      "retained_samples": 2300
+    },
+    "test_audit": {
+      "input_samples": 975,
+      "unique_vectors": 388,
+      "ambiguous_vector_groups_removed": 3,
+      "retained_samples": 324,
+      "train_overlap_vectors_removed": 61
+    },
+    "excluded_domains": [
+      "SIGNATURE",
+      "STRING",
+      "SYSTEM"
+    ],
+    "input_sha256": {
+      "mlran_dataset_metadata.csv": "1cdb3180446d20dd0cc7fb24ae973fed281a37eb020b2191ff7566230035d3de",
+      "MLRan_labels.csv": "c409c5dc9eb9976a1e8526aeaadc106a800941ff12f4302db76ed0e416cd5f92",
+      "MLRan_X_test_RFE.csv": "b10ed700de1243702b1162f805ef452c52e8719b39f7a751bb1f24df2f9c5b11",
+      "MLRan_X_train_RFE.csv": "8bf6eb3978272127978fcc198f75050c9d3a1adc9955c9bb0dd0f6d9928e5284"
+    },
+    "parameters": {
+      "max_depth": 4,
+      "eta": 0.05,
+      "subsample": 0.9,
+      "colsample_bytree": 0.9,
+      "objective": "binary:logistic",
+      "eval_metric": "logloss",
+      "seed": 20261014,
+      "nthread": 1
+    },
+    "boost_rounds": 160
+  },
+  "metrics": {
+    "accuracy": 0.9290123456790124,
+    "precision": 0.8529411764705882,
+    "recall": 0.9157894736842105,
+    "f1": 0.883248730964467,
+    "false_positive_rate": 0.06550218340611354
+  },
+  "confusion_matrix": {
+    "tp": 87,
+    "tn": 214,
+    "fp": 15,
+    "fn": 8
+  },
+  "limitations": [
+    "Published MLRan tabular features; this model is XGBoost, not a temporal TCN validation.",
+    "Publisher-preselected feature matrix; upstream selection and collection biases are not independently eliminated.",
+    "Train/test IDs and exact selected-feature vectors are disjoint after documented cleaning; no family-disjoint or prospective test is claimed.",
+    "Risk score is model probability, not a calibrated estimate of real-world infection risk.",
+    "File indicators are binary recorded evidence; uploaded paths are never accessed or executed."
+  ],
+  "model_sha256": {
+    "model.json": "a6023f556a714a107bbcfeecefaa14bcce057209005c70559b0588fd6f9d089c",
+    "xgboost_model.json": "04453e320f1993a57cf43b1ebc473a2ef3d453efca6c30dd5c42aacb574ae722"
+  },
+  "heldout_csv_sha256": "0c602f71b6bb9bd2e2f41fe1844705afc1801d75907305e88a13787315ac30e5"
+}

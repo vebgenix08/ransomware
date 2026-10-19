@@ -1,0 +1,356 @@
+{
+  "dataset": "Synthetic workflow fixture",
+  "source": "locally generated; not a published dataset",
+  "evaluated_at": "2026-10-14T04:29:13.349114+00:00",
+  "dataset_sha256": "39b0feea59af40b6673d802ad27159a0bc58e949637de57974cfa1b7e93b4ef5",
+  "model_sha256": {
+    "behavioral_model.json": "383e42c46982847b36f163862a63e040cedbda019ffc7b1b0300c34b6e9160d7",
+    "tcn_weights.npz": "cedabbcd34eebcc62171a3e09036316b93cf03b8b1ad6eee5e688fff73261f99",
+    "xgboost_model.json": "b40ac6284d620a28003651614722f4921f56c8d0475d1bb43a2dfc538d7e1e33"
+  },
+  "threshold": 0.6,
+  "column_mapping": {},
+  "windows": 16,
+  "traces": 2,
+  "window_seconds": 2.0,
+  "confusion_matrix": {
+    "tp": 8,
+    "tn": 8,
+    "fp": 0,
+    "fn": 0
+  },
+  "metrics": {
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "false_positive_rate": 0.0
+  },
+  "limitations": [
+    "Window-level metrics; correlated windows are not independent samples.",
+    "Initial windows use the detector's repeated-first-window padding.",
+    "Dataset provenance and feature semantics require independent review."
+  ],
+  "predictions": [
+    {
+      "trace_id": "synthetic_0",
+      "window_index": 0,
+      "label": 0,
+      "probability": 0.022133352234959602,
+      "prediction": 0,
+      "observed_activity": {
+        "created_count": 0.0,
+        "modified_count": 0.0,
+        "deleted_count": 0.0,
+        "cpu_percent": 10.0,
+        "memory_percent": 30.0,
+        "process_count": 100.0,
+        "canary_accessed": 0.0,
+        "canary_modified": 0.0,
+        "decoy_files_touched": 0.0,
+        "directories_touched": 0.0,
+        "operation_rate": 0.0
+      }
+    },
+    {
+      "trace_id": "synthetic_0",
+      "window_index": 1,
+      "label": 0,
+      "probability": 0.022133352234959602,
+      "prediction": 0,
+      "observed_activity": {
+        "created_count": 0.0,
+        "modified_count": 0.0,
+        "deleted_count": 0.0,
+        "cpu_percent": 10.0,
+        "memory_percent": 30.0,
+        "process_count": 100.0,
+        "canary_accessed": 0.0,
+        "canary_modified": 0.0,
+        "decoy_files_touched": 0.0,
+        "directories_touched": 0.0,
+        "operation_rate": 0.0
+      }
+    },
+    {
+      "trace_id": "synthetic_0",
+      "window_index": 2,
+      "label": 0,
+      "probability": 0.022133352234959602,
+      "prediction": 0,
+      "observed_activity": {
+        "created_count": 0.0,
+        "modified_count": 0.0,
+        "deleted_count": 0.0,
+        "cpu_percent": 10.0,
+        "memory_percent": 30.0,
+        "process_count": 100.0,
+        "canary_accessed": 0.0,
+        "canary_modified": 0.0,
+        "decoy_files_touched": 0.0,
+        "directories_touched": 0.0,
+        "operation_rate": 0.0
+      }
+    },
+    {
+      "trace_id": "synthetic_0",
+      "window_index": 3,
+      "label": 0,
+      "probability": 0.022133352234959602,
+      "prediction": 0,
+      "observed_activity": {
+        "created_count": 0.0,
+        "modified_count": 0.0,
+        "deleted_count": 0.0,
+        "cpu_percent": 10.0,
+        "memory_percent": 30.0,
+        "process_count": 100.0,
+        "canary_accessed": 0.0,
+        "canary_modified": 0.0,
+        "decoy_files_touched": 0.0,
+        "directories_touched": 0.0,
+        "operation_rate": 0.0
+      }
+    },
+    {
+      "trace_id": "synthetic_0",
+      "window_index": 4,
+      "label": 0,
+      "probability": 0.022133352234959602,
+      "prediction": 0,
+      "observed_activity": {
+        "created_count": 0.0,
+        "modified_count": 0.0,
+        "deleted_count": 0.0,
+        "cpu_percent": 10.0,
+        "memory_percent": 30.0,
+        "process_count": 100.0,
+        "canary_accessed": 0.0,
+        "canary_modified": 0.0,
+        "decoy_files_touched": 0.0,
+        "directories_touched": 0.0,
+        "operation_rate": 0.0
+      }
+    },
+    {
+      "trace_id": "synthetic_0",
+      "window_index": 5,
+      "label": 0,
+      "probability": 0.022133352234959602,
+      "prediction": 0,
+      "observed_activity": {
+        "created_count": 0.0,
+        "modified_count": 0.0,
+        "deleted_count": 0.0,
+        "cpu_percent": 10.0,
+        "memory_percent": 30.0,
+        "process_count": 100.0,
+        "canary_accessed": 0.0,
+        "canary_modified": 0.0,
+        "decoy_files_touched": 0.0,
+        "directories_touched": 0.0,
+        "operation_rate": 0.0
+      }
+    },
+    {
+      "trace_id": "synthetic_0",
+      "window_index": 6,
+      "label": 0,
+      "probability": 0.022133352234959602,
+      "prediction": 0,
+      "observed_activity": {
+        "created_count": 0.0,
+        "modified_count": 0.0,
+        "deleted_count": 0.0,
+        "cpu_percent": 10.0,
+        "memory_percent": 30.0,
+        "process_count": 100.0,
+        "canary_accessed": 0.0,
+        "canary_modified": 0.0,
+        "decoy_files_touched": 0.0,
+        "directories_touched": 0.0,
+        "operation_rate": 0.0
+      }
+    },
+    {
+      "trace_id": "synthetic_0",
+      "window_index": 7,
+      "label": 0,
+      "probability": 0.022133352234959602,
+      "prediction": 0,
+      "observed_activity": {
+        "created_count": 0.0,
+        "modified_count": 0.0,
+        "deleted_count": 0.0,
+        "cpu_percent": 10.0,
+        "memory_percent": 30.0,
+        "process_count": 100.0,
+        "canary_accessed": 0.0,
+        "canary_modified": 0.0,
+        "decoy_files_touched": 0.0,
+        "directories_touched": 0.0,
+        "operation_rate": 0.0
+      }
+    },
+    {
+      "trace_id": "synthetic_1",
+      "window_index": 0,
+      "label": 1,
+      "probability": 0.9010024070739746,
+      "prediction": 1,
+      "observed_activity": {
+        "created_count": 24.0,
+        "modified_count": 3.0,
+        "deleted_count": 5.0,
+        "cpu_percent": 10.0,
+        "memory_percent": 30.0,
+        "process_count": 100.0,
+        "canary_accessed": 1.0,
+        "canary_modified": 1.0,
+        "decoy_files_touched": 32.0,
+        "directories_touched": 5.0,
+        "operation_rate": 16.0
+      }
+    },
+    {
+      "trace_id": "synthetic_1",
+      "window_index": 1,
+      "label": 1,
+      "probability": 0.9010024070739746,
+      "prediction": 1,
+      "observed_activity": {
+        "created_count": 24.0,
+        "modified_count": 3.0,
+        "deleted_count": 5.0,
+        "cpu_percent": 10.0,
+        "memory_percent": 30.0,
+        "process_count": 100.0,
+        "canary_accessed": 1.0,
+        "canary_modified": 1.0,
+        "decoy_files_touched": 32.0,
+        "directories_touched": 5.0,
+        "operation_rate": 16.0
+      }
+    },
+    {
+      "trace_id": "synthetic_1",
+      "window_index": 2,
+      "label": 1,
+      "probability": 0.9010024070739746,
+      "prediction": 1,
+      "observed_activity": {
+        "created_count": 24.0,
+        "modified_count": 3.0,
+        "deleted_count": 5.0,
+        "cpu_percent": 10.0,
+        "memory_percent": 30.0,
+        "process_count": 100.0,
+        "canary_accessed": 1.0,
+        "canary_modified": 1.0,
+        "decoy_files_touched": 32.0,
+        "directories_touched": 5.0,
+        "operation_rate": 16.0
+      }
+    },
+    {
+      "trace_id": "synthetic_1",
+      "window_index": 3,
+      "label": 1,
+      "probability": 0.9010024070739746,
+      "prediction": 1,
+      "observed_activity": {
+        "created_count": 24.0,
+        "modified_count": 3.0,
+        "deleted_count": 5.0,
+        "cpu_percent": 10.0,
+        "memory_percent": 30.0,
+        "process_count": 100.0,
+        "canary_accessed": 1.0,
+        "canary_modified": 1.0,
+        "decoy_files_touched": 32.0,
+        "directories_touched": 5.0,
+        "operation_rate": 16.0
+      }
+    },
+    {
+      "trace_id": "synthetic_1",
+      "window_index": 4,
+      "label": 1,
+      "probability": 0.9010024070739746,
+      "prediction": 1,
+      "observed_activity": {
+        "created_count": 24.0,
+        "modified_count": 3.0,
+        "deleted_count": 5.0,
+        "cpu_percent": 10.0,
+        "memory_percent": 30.0,
+        "process_count": 100.0,
+        "canary_accessed": 1.0,
+        "canary_modified": 1.0,
+        "decoy_files_touched": 32.0,
+        "directories_touched": 5.0,
+        "operation_rate": 16.0
+      }
+    },
+    {
+      "trace_id": "synthetic_1",
+      "window_index": 5,
+      "label": 1,
+      "probability": 0.9010024070739746,
+      "prediction": 1,
+      "observed_activity": {
+        "created_count": 24.0,
+        "modified_count": 3.0,
+        "deleted_count": 5.0,
+        "cpu_percent": 10.0,
+        "memory_percent": 30.0,
+        "process_count": 100.0,
+        "canary_accessed": 1.0,
+        "canary_modified": 1.0,
+        "decoy_files_touched": 32.0,
+        "directories_touched": 5.0,
+        "operation_rate": 16.0
+      }
+    },
+    {
+      "trace_id": "synthetic_1",
+      "window_index": 6,
+      "label": 1,
+      "probability": 0.9010024070739746,
+      "prediction": 1,
+      "observed_activity": {
+        "created_count": 24.0,
+        "modified_count": 3.0,
+        "deleted_count": 5.0,
+        "cpu_percent": 10.0,
+        "memory_percent": 30.0,
+        "process_count": 100.0,
+        "canary_accessed": 1.0,
+        "canary_modified": 1.0,
+        "decoy_files_touched": 32.0,
+        "directories_touched": 5.0,
+        "operation_rate": 16.0
+      }
+    },
+    {
+      "trace_id": "synthetic_1",
+      "window_index": 7,
+      "label": 1,
+      "probability": 0.9010024070739746,
+      "prediction": 1,
+      "observed_activity": {
+        "created_count": 24.0,
+        "modified_count": 3.0,
+        "deleted_count": 5.0,
+        "cpu_percent": 10.0,
+        "memory_percent": 30.0,
+        "process_count": 100.0,
+        "canary_accessed": 1.0,
+        "canary_modified": 1.0,
+        "decoy_files_touched": 32.0,
+        "directories_touched": 5.0,
+        "operation_rate": 16.0
+      }
+    }
+  ]
+}

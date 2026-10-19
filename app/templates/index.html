@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block title %}RansomShield | Behavioral Threat Detection{% endblock %}
+
+{% block styles %}
+<style>
+    .hero { min-height: 92vh; padding: 10rem 0 6rem; position: relative; isolation: isolate; }
+    .hero::before { content: ""; position: absolute; inset: 0; z-index: -2; opacity: .8; background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); background-size: 54px 54px; mask-image: linear-gradient(to bottom, #000 5%, transparent 86%); }
+    .hero::after { content: ""; position: absolute; z-index: -1; width: 34rem; height: 34rem; top: 4rem; right: -12rem; border-radius: 50%; background: color-mix(in srgb, var(--brand) 14%, transparent); filter: blur(50px); }
+    .eyebrow { display: inline-flex; align-items: center; gap: .55rem; padding: .5rem .75rem; color: var(--brand-strong); border: 1px solid color-mix(in srgb, var(--brand) 28%, transparent); border-radius: 999px; background: var(--brand-soft); font-size: .74rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+    .status-dot { width: .46rem; height: .46rem; border-radius: 50%; background: var(--brand); box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 55%, transparent); animation: pulse 2.2s infinite; }
+    @keyframes pulse { 70% { box-shadow: 0 0 0 9px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+    .hero-title { max-width: 850px; margin: 1.45rem 0 0; color: var(--text); font-size: clamp(3.2rem, 7vw, 6.6rem); font-weight: 780; letter-spacing: -.067em; line-height: .96; }
+    .accent-word { color: var(--brand); }
+    .hero-copy { max-width: 680px; margin-top: 1.6rem; color: var(--muted); font-size: clamp(1.05rem, 2vw, 1.2rem); line-height: 1.75; }
+    .dashboard-card { overflow: hidden; border: 1px solid var(--line); border-radius: 1.3rem; background: var(--surface); box-shadow: var(--shadow); }
+    .dashboard-header { display: flex; align-items: center; justify-content: space-between; padding: 1.1rem 1.25rem; border-bottom: 1px solid var(--line); }
+    .shield-visual { width: 9.5rem; height: 9.5rem; display: grid; place-items: center; margin: 1.8rem auto; color: var(--brand-strong); border: 1px solid color-mix(in srgb, var(--brand) 25%, transparent); border-radius: 50%; background: radial-gradient(circle, var(--brand-soft) 0 47%, transparent 48%), conic-gradient(var(--brand) 0 86%, var(--surface-soft) 86% 100%); box-shadow: 0 0 0 12px var(--surface), 0 0 0 13px var(--line); font-size: 2.7rem; }
+    .signal-row { display: grid; grid-template-columns: 2rem minmax(0, 1fr) auto; gap: .75rem; align-items: center; padding: .9rem 0; border-top: 1px solid var(--line); }
+    .signal-icon { width: 2rem; height: 2rem; display: grid; place-items: center; color: var(--brand-strong); border-radius: .55rem; background: var(--brand-soft); }
+    .section-space { padding: 6.8rem 0; }
+    .section-kicker { color: var(--accent); font-size: .76rem; font-weight: 850; letter-spacing: .14em; text-transform: uppercase; }
+    .section-title { max-width: 760px; margin-top: .7rem; color: var(--text); font-size: clamp(2.2rem, 4.5vw, 3.8rem); font-weight: 780; letter-spacing: -.05em; line-height: 1.08; }
+    .step-card { height: 100%; padding: 1.6rem; border: 1px solid var(--line); border-radius: 1rem; background: var(--surface); transition: transform .22s ease, border-color .22s ease; }
+    .step-card:hover { transform: translateY(-5px); border-color: var(--brand); }
+    .step-icon { width: 3rem; height: 3rem; display: grid; place-items: center; color: var(--brand-strong); border-radius: .8rem; background: var(--brand-soft); font-size: 1.25rem; }
+    .step-tag, .member-number { color: var(--accent); font-size: .7rem; font-weight: 850; letter-spacing: .12em; text-transform: uppercase; }
+    .phase-state { display: inline-flex; padding: .3rem .58rem; border-radius: 999px; background: var(--surface-soft); color: var(--muted); font-size: .7rem; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; }
+    .phase-state.active { color: var(--accent); background: var(--accent-soft); }
+    .roadmap-wrap { padding: clamp(1.5rem, 4vw, 3rem); border: 1px solid var(--line); border-radius: 1.3rem; background: var(--surface); box-shadow: var(--shadow); }
+    .roadmap-item { position: relative; padding-left: 3.3rem; padding-bottom: 2.3rem; }
+    .roadmap-item:last-child { padding-bottom: 0; }
+    .roadmap-item::before { content: ""; position: absolute; top: 2.25rem; bottom: 0; left: 1.15rem; width: 1px; background: var(--line); }
+    .roadmap-item:last-child::before { display: none; }
+    .roadmap-marker { position: absolute; top: 0; left: 0; width: 2.35rem; height: 2.35rem; display: grid; place-items: center; color: var(--muted); border: 1px solid var(--line); border-radius: .7rem; background: var(--surface-soft); font-size: .82rem; font-weight: 850; }
+    .roadmap-item.complete .roadmap-marker { color: #fff; border-color: var(--brand-strong); background: var(--brand-strong); }
+    [data-theme="dark"] .roadmap-item.complete .roadmap-marker { color: #172019; }
+    .roadmap-item.current .roadmap-marker { color: #2b1c08; border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 6px var(--accent-soft); }
+    .team-card { height: 100%; overflow: hidden; border: 1px solid var(--line); border-radius: 1rem; background: var(--surface); transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease; }
+    .team-card:hover { transform: translateY(-5px); border-color: var(--brand); box-shadow: var(--shadow); }
+    .member-top { min-height: 12rem; display: grid; place-items: center; position: relative; background: linear-gradient(145deg, color-mix(in srgb, var(--brand-soft) 75%, var(--surface)), var(--surface-soft)); }
+    .member-top::after { content: attr(data-index); position: absolute; right: 1rem; top: .7rem; color: color-mix(in srgb, var(--brand) 25%, transparent); font-size: 3.5rem; font-weight: 850; }
+    .member-avatar { width: 6rem; height: 6rem; display: grid; place-items: center; color: #fff; border: 5px solid var(--surface); border-radius: 50%; background: var(--brand-strong); box-shadow: 0 14px 34px rgba(35, 70, 51, .2); font-size: 1.45rem; font-weight: 850; z-index: 1; }
+    [data-theme="dark"] .member-avatar { color: #172019; }
+    .member-body { padding: 1.35rem; }
+    @media (max-width: 991.98px) { .hero { min-height: auto; padding-top: 8.5rem; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<header>
+    <section id="home" class="hero d-flex align-items-center">
+        <div class="container">
+            <div class="row align-items-center g-5">
+                <div class="col-lg-7">
+                    <span class="eyebrow"><span class="status-dot"></span>Behavioral security research</span>
+                    <h1 class="hero-title">Understand behavior.<br><span class="accent-word">Respond earlier.</span></h1>
+                    <p class="hero-copy">RansomShield studies file, process, and system activity to identify suspicious ransomware behavior and deliver clear, timely alerts.</p>
+                    <div class="d-flex flex-wrap gap-3 mt-4 pt-2">
+                        {% if current_user.is_authenticated %}
+                            <a class="btn-brand" href="{{ url_for('main.dashboard') }}">Open dashboard <i class="bi bi-arrow-right ms-2"></i></a>
+                        {% else %}
+                            <a class="btn-brand" href="{{ url_for('auth.signup') }}">Create free account <i class="bi bi-arrow-right ms-2"></i></a>
+                            <a class="btn-outline-custom" href="{{ url_for('auth.signin') }}">Sign in</a>
+                        {% endif %}
+                    </div>
+                    <div class="d-flex flex-wrap gap-4 mt-5 muted small">
+                        <span><i class="bi bi-check2 me-2" style="color:var(--brand)"></i>Behavior-focused</span>
+                        <span><i class="bi bi-check2 me-2" style="color:var(--brand)"></i>Hybrid ML model</span>
+                        <span><i class="bi bi-check2 me-2" style="color:var(--brand)"></i>Alert-driven</span>
+                    </div>
+                </div>
+                <div class="col-lg-5">
+                    <div class="dashboard-card" aria-label="System status concept preview">
+                        <div class="dashboard-header"><div><small class="muted d-block">SYSTEM OVERVIEW</small><strong>Behavior monitor</strong></div><span class="phase-state active">Concept preview</span></div>
+                        <div class="p-4">
+                            <div class="shield-visual"><i class="bi bi-shield-check"></i></div>
+                            <div class="text-center mb-4"><div class="h4 mb-1">Normal activity</div><div class="muted small">Example behavioral risk state</div></div>
+                            <div class="signal-row"><span class="signal-icon"><i class="bi bi-folder2-open"></i></span><div><strong class="small d-block">File operations</strong><span class="muted" style="font-size:.75rem">Within normal range</span></div><span class="phase-state">Stable</span></div>
+                            <div class="signal-row"><span class="signal-icon"><i class="bi bi-cpu"></i></span><div><strong class="small d-block">Process behavior</strong><span class="muted" style="font-size:.75rem">Baseline matched</span></div><span class="phase-state">Normal</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+</header>
+
+<main>
+    <section id="how-it-works" class="section-space">
+        <div class="container">
+            <div class="row align-items-end g-4 mb-5">
+                <div class="col-lg-8"><div class="section-kicker">How it works</div><h2 class="section-title">A straightforward path from system activity to an actionable alert.</h2></div>
+                <div class="col-lg-4"><p class="muted mb-0">Each layer has one responsibility, making the system easier to build, test, explain, and improve.</p></div>
+            </div>
+            <div class="row g-4">
+                {% set steps = [
+                    ('bi-activity', 'Collect behavior', 'Observe relevant file operations, process events, CPU usage, and memory activity.'),
+                    ('bi-funnel', 'Prepare features', 'Clean and normalize event data, then organize it into ordered temporal windows.'),
+                    ('bi-diagram-3', 'Analyze patterns', 'Use TCN-derived temporal features with XGBoost to estimate suspicious behavior.'),
+                    ('bi-bell', 'Generate alerts', 'Show the risk score, event evidence, and timestamp through the Flask dashboard.')
+                ] %}
+                {% for icon, title, copy in steps %}
+                    <div class="col-md-6 col-xl-3">
+                        <article class="step-card">
+                            <div class="d-flex align-items-center justify-content-between"><span class="step-icon"><i class="bi {{ icon }}"></i></span><span class="step-tag">STEP 0{{ loop.index }}</span></div>
+                            <h3 class="h5 mt-4">{{ title }}</h3><p class="muted mb-0">{{ copy }}</p>
+                        </article>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+
+    <section id="roadmap" class="section-space">
+        <div class="container">
+            <div class="row g-5 align-items-start">
+                <div class="col-lg-5">
+                    <div class="section-kicker">Project roadmap</div><h2 class="section-title">Building RansomShield one validated layer at a time.</h2>
+                    <p class="muted mt-4">Status reflects local implementation and testing as of 14 October 2026. Synthetic results do not establish real-world detection performance.</p>
+                    <div class="mt-4 p-4 rounded-4" style="background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 24%,transparent)"><div class="d-flex gap-3"><i class="bi bi-compass fs-4" style="color:var(--accent)"></i><div><strong class="d-block mb-1">Current focus</strong><span class="muted small">Compatible published telemetry, physical two-laptop transfer, and real notification delivery verification.</span></div></div></div>
+                </div>
+                <div class="col-lg-7">
+                    <div class="roadmap-wrap">
+                        <article class="roadmap-item complete"><span class="roadmap-marker"><i class="bi bi-check-lg"></i></span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 01</span><span class="phase-state">Completed</span></div><h3 class="h5">Research and system design</h3><p class="muted mb-0">Define the problem, related work, behavioral signals, and hybrid architecture.</p></article>
+                        <article class="roadmap-item complete"><span class="roadmap-marker">02</span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 02</span><span class="phase-state">Completed</span></div><h3 class="h5">Flask application and accounts</h3><p class="muted mb-0">Authentication, live dashboard, run history, incident details and downloadable CSV reports are implemented and locally tested.</p></article>
+                        <article class="roadmap-item complete"><span class="roadmap-marker">03</span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 03</span><span class="phase-state">Completed</span></div><h3 class="h5">Synthetic model and safe response</h3><p class="muted mb-0">TCN + XGBoost trained on 6,000 synthetic sequences. Safe simulations, telemetry CSV evaluation, test-file quarantine and configurable notifications are locally tested.</p></article>
+                        <article class="roadmap-item current"><span class="roadmap-marker">04</span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 04</span><span class="phase-state active">In progress</span></div><h3 class="h5">Published dataset integration</h3><p class="muted mb-0">Published MLRan CSV integrated with separately trained XGBoost: 2,300 training and 324 held-out samples. Temporal TCN validation on published data remains pending.</p></article>
+                        <article class="roadmap-item"><span class="roadmap-marker">05</span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 05</span><span class="phase-state">Planned</span></div><h3 class="h5">External validation and two-laptop delivery</h3><p class="muted mb-0">Verify secure transfer on actual laptops, real email/webhook delivery and independent published-data performance.</p></article>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="team" class="section-space">
+        <div class="container">
+            <div class="text-center mx-auto mb-5" style="max-width:760px"><div class="section-kicker">Meet our team</div><h2 class="section-title mx-auto">Four members working toward one clear security goal.</h2><p class="muted mt-3">The student team behind the research, design, development, and evaluation of RansomShield.</p></div>
+            <div class="row g-4">
+                {% set members = [('AM', 'Archana M'), ('CT', 'Chandan T N'), ('GP', 'Gouri K Patil'), ('KS', 'Karan S')] %}
+                {% for initials, name in members %}
+                    <div class="col-sm-6 col-xl-3"><article class="team-card"><div class="member-top" data-index="0{{ loop.index }}"><div class="member-avatar">{{ initials }}</div></div><div class="member-body"><span class="member-number">Team member 0{{ loop.index }}</span><h3 class="h5 mt-2 mb-1">{{ name }}</h3><p class="muted small mb-0">Research &amp; Development Team</p></div></article></div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+</main>
+{% endblock %}

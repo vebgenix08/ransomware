@@ -1,0 +1,72 @@
+{
+  "schema_version": 2,
+  "model_type": "tcn_xgboost_hybrid",
+  "display_name": "TCN + XGBoost Behavioral Model",
+  "feature_names": [
+    "created_count",
+    "modified_count",
+    "deleted_count",
+    "cpu_percent",
+    "memory_percent",
+    "process_count",
+    "canary_accessed",
+    "canary_modified",
+    "decoy_files_touched",
+    "directories_touched",
+    "operation_rate"
+  ],
+  "sequence_length": 8,
+  "kernel_size": 3,
+  "dilation": 2,
+  "tcn_filters": 8,
+  "means": [
+    4.359271049499512,
+    7.088776111602783,
+    2.083932399749756,
+    42.24591827392578,
+    58.01983642578125,
+    135.71669006347656,
+    0.14065104722976685,
+    0.09851562231779099,
+    13.53197956085205,
+    1.091406226158142,
+    6.765989780426025
+  ],
+  "scales": [
+    5.356723308563232,
+    8.641900062561035,
+    3.5455775260925293,
+    26.235370635986328,
+    15.519338607788086,
+    42.104461669921875,
+    0.3476879894733429,
+    0.29807716608047485,
+    16.413671493530273,
+    1.3192358016967773,
+    8.206835746765137
+  ],
+  "tcn_artifact": "tcn_weights.npz",
+  "xgboost_artifact": "xgboost_model.json",
+  "decision_threshold": 0.6,
+  "trained_at": "2026-10-14T04:25:43.785545+00:00",
+  "training": {
+    "source": "safe_synthetic_sequential_decoy_telemetry",
+    "seed": 20261014,
+    "training_samples": 4800,
+    "test_samples": 1200,
+    "xgboost_only_metrics": {
+      "accuracy": 0.9642,
+      "precision": 0.9698,
+      "recall": 0.9451,
+      "f1": 0.9573,
+      "false_positive_rate": 0.0217
+    }
+  },
+  "metrics": {
+    "accuracy": 0.965,
+    "precision": 0.9699,
+    "recall": 0.9471,
+    "f1": 0.9583,
+    "false_positive_rate": 0.0217
+  }
+}

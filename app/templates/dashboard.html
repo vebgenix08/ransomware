@@ -1,0 +1,346 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard | RansomShield{% endblock %}
+{% block description %}Live RansomShield monitoring dashboard.{% endblock %}
+
+{% block styles %}
+<style>
+    .dashboard-heading { font-size: clamp(2.2rem, 5vw, 3.7rem); font-weight: 780; letter-spacing: -.055em; }
+    .status-card { height: 100%; padding: 1.35rem; border: 1px solid var(--line); border-radius: 1rem; background: var(--surface); }
+    .status-icon { width: 2.8rem; height: 2.8rem; display: grid; place-items: center; color: var(--brand-strong); border-radius: .75rem; background: var(--brand-soft); font-size: 1.15rem; }
+    .metric-value { font-size: 2rem; font-weight: 780; letter-spacing: -.04em; }
+    .state-badge { display: inline-flex; align-items: center; gap: .4rem; padding: .35rem .62rem; border-radius: 999px; color: var(--muted); background: var(--surface-soft); font-size: .7rem; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
+    .state-badge.running { color: var(--brand-strong); background: var(--brand-soft); }
+    .state-dot { width: .45rem; height: .45rem; border-radius: 50%; background: currentColor; }
+    .control-bar { display: flex; flex-wrap: wrap; gap: .7rem; padding: 1rem; border: 1px solid var(--line); border-radius: 1rem; background: var(--surface); }
+    .feedback { display: flex; gap: .7rem; align-items: center; padding: .8rem 1rem; border: 1px solid color-mix(in srgb, var(--brand) 24%, transparent); border-radius: .75rem; color: var(--brand-strong); background: var(--brand-soft); font-size: .85rem; }
+    .feedback.error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 24%, transparent); background: var(--danger-soft); }
+    .progress-track { height: .42rem; overflow: hidden; border-radius: 999px; background: var(--surface-soft); }
+    .progress-value { height: 100%; border-radius: inherit; background: var(--brand); transition: width .4s ease; }
+    .feed-row { display: grid; grid-template-columns: 2.4rem minmax(0, 1fr) auto; gap: .85rem; align-items: start; padding: 1rem 0; border-bottom: 1px solid var(--line); }
+    .feed-row:last-child { border-bottom: 0; }
+    .feed-icon { width: 2.4rem; height: 2.4rem; display: grid; place-items: center; color: var(--brand-strong); border-radius: .65rem; background: var(--brand-soft); }
+    .feed-icon.warning { color: var(--accent); background: var(--accent-soft); }
+    .feed-icon.high { color: var(--danger); background: var(--danger-soft); }
+    .empty-state { display: grid; place-items: center; min-height: 230px; padding: 2rem; text-align: center; }
+    .account-chip { display: inline-flex; align-items: center; gap: .6rem; padding: .5rem .75rem; color: var(--brand-strong); border-radius: 999px; background: var(--brand-soft); font-size: .78rem; font-weight: 750; }
+    .safe-note { padding: 1rem; border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent); border-radius: .8rem; background: var(--accent-soft); }
+    button:disabled { cursor: not-allowed; opacity: .55; transform: none !important; }
+</style>
+{% endblock %}
+
+{% block content %}
+<main class="page-shell" x-data="monitorDashboard()">
+    <div class="container">
+        <div class="d-flex flex-column flex-xl-row justify-content-between align-items-xl-end gap-4 mb-4">
+            <div>
+                <span class="account-chip"><i class="bi bi-shield-check"></i>Authenticated workspace</span>
+                <h1 class="dashboard-heading mt-3 mb-2">Welcome, {{ current_user.full_name }}.</h1>
+                <p class="muted mb-0">Monitor a synthetic decoy server, detect canary interaction, and review behavioral risk evidence.</p>
+            </div>
+            <div class="control-bar">
+                <button class="btn-brand" type="button" @click="startMonitor" :disabled="busy || status.running"><i class="bi bi-play-fill me-2"></i>Start monitoring</button>
+                <button class="btn-outline-custom" type="button" @click="stopMonitor" :disabled="busy || !status.running"><i class="bi bi-stop-fill me-2"></i>Stop</button>
+                <button class="btn-outline-custom" type="button" @click="runDemo" :disabled="busy"><i class="bi bi-beaker me-2"></i>Simulate activity</button>
+            </div>
+        </div>
+
+        <div x-cloak x-show="feedback" x-transition class="feedback mb-4" :class="feedbackType === 'error' ? 'error' : ''">
+            <i class="bi" :class="feedbackType === 'error' ? 'bi-exclamation-circle' : 'bi-info-circle'"></i>
+            <span x-text="feedback"></span>
+            <button class="btn p-0 border-0 ms-auto" type="button" @click="feedback=''" aria-label="Dismiss"><i class="bi bi-x-lg"></i></button>
+        </div>
+
+        <section class="panel p-4 mb-4" aria-labelledby="dataset-heading">
+            <h2 class="h4">Published MLRan dataset — ready to run</h2>
+            <p class="small muted">The dataset and trained XGBoost model are included. No dataset upload or second laptop is needed for these local runs. The temporal TCN + XGBoost model remains available for telemetry and simulations.</p>
+            <div class="d-flex flex-wrap gap-2 mb-3">
+                <button type="button" class="btn-brand" @click="performAction('/api/runs/mlran')" :disabled="busy">Run included MLRan dataset</button>
+                <button type="button" class="btn-outline-custom" @click="performAction('/api/runs/local-transfer')" :disabled="busy">Demo sender → receiver locally</button>
+                <a class="btn-outline-custom" href="/api/datasets/mlran.csv">Download MLRan test CSV</a>
+            </div>
+            <p class="small muted">Local transfer demo copies records through the receiver workflow on this laptop. It does not test Wi-Fi or SSH. Suspicious predictions quarantine generated placeholders only.</p>
+            <details class="mb-3"><summary>Published-data training results</summary>
+                <p class="small mt-2"><span x-text="publishedModel.display_name || 'Model unavailable'"></span> · Training samples: <span x-text="publishedModel.training?.training_samples ?? '—'"></span> · Held-out samples: <span x-text="publishedModel.training?.test_samples ?? '—'"></span></p>
+                <p class="small">Accuracy: <span x-text="metric(publishedModel.metrics?.accuracy)"></span> · Precision: <span x-text="metric(publishedModel.metrics?.precision)"></span> · Recall: <span x-text="metric(publishedModel.metrics?.recall)"></span> · F1: <span x-text="metric(publishedModel.metrics?.f1)"></span></p>
+                <p class="small muted" x-text="(publishedModel.limitations || []).join(' ')"></p>
+            </details>
+            <details class="mb-3"><summary>Two-laptop workflow: this dashboard is Laptop 2</summary>
+                <p class="small mt-2">Laptop 1 sends CSV records through SSH/SFTP. Keep <code>scripts/receive_dataset.py --email YOUR_ACCOUNT_EMAIL</code> running on Laptop 2. Received datasets appear here automatically as <strong>laptop_transfer</strong> runs after checksum validation.</p>
+                <p class="small muted">Use the Windows setup guide <code>TWO_LAPTOP_SETUP.md</code>. Only generated test placeholders are quarantined on Laptop 2; files on Laptop 1 are never changed.</p>
+            </details>
+            <details class="mb-3"><summary>Model training status</summary>
+                <p class="small mt-2">Trained: <span x-text="formatDate(model.trained_at)"></span> · Source: <span x-text="model.training?.source || model.error || 'Loading'"></span></p>
+                <p class="small">Training sequences: <span x-text="model.training?.training_samples ?? '—'"></span> · Held-out sequences: <span x-text="model.training?.test_samples ?? '—'"></span> · Accuracy: <span x-text="metric(model.metrics?.accuracy)"></span> · F1: <span x-text="metric(model.metrics?.f1)"></span></p>
+                <p class="small muted">These are synthetic held-out metrics. Published-dataset validation remains pending.</p>
+            </details>
+            <h2 id="dataset-heading" class="h4">Run a safe telemetry dataset</h2>
+            <p class="small"><a href="/api/datasets/sample.csv">Download safe synthetic CSV for a practice run</a></p>
+            <p class="muted small">Upload labeled two-second telemetry or published MLRan feature CSVs (maximum 5 MB / 2,000 records). The matching model is selected automatically. RanDe-W11 remains unsupported; missing features are rejected.</p>
+            <form @submit.prevent="uploadDataset" class="row g-3">
+                <div class="col-md-4"><label for="dataset-file" class="form-label">CSV dataset</label><input id="dataset-file" x-ref="datasetFile" type="file" accept=".csv" required class="form-control"></div>
+                <div class="col-md-3"><label for="dataset-name" class="form-label">Dataset name</label><input id="dataset-name" x-model="datasetName" required maxlength="200" class="form-control"></div>
+                <div class="col-md-3"><label for="dataset-source" class="form-label">Source / provenance</label><input id="dataset-source" x-model="datasetSource" required maxlength="500" class="form-control"></div>
+                <div class="col-md-2 d-flex align-items-end"><button type="submit" class="btn-brand" :disabled="busy">Analyze CSV</button></div>
+            </form>
+            <p class="small muted mt-3 mb-0">CSV data is never executed. Suspicious windows quarantine generated test placeholders only. Live notifications: email <strong x-text="notifications.email"></strong>, webhook <strong x-text="notifications.webhook"></strong>.</p>
+            <details class="small muted mt-2"><summary>Configure notifications</summary><p x-text="notifications.configuration"></p><p>Delivery is recorded per incident as sent, failed, or disabled. Sent means accepted by the mail server or webhook, not read by a recipient.</p></details>
+        </section>
+        <section class="panel p-4 mb-4" aria-labelledby="runs-heading">
+            <h2 id="runs-heading" class="h4">Run history and incident reports</h2>
+            <p class="muted small">Refreshes every three seconds and after every run. Risk is the highest model probability in the run.</p>
+            <p x-show="!runs.length" class="muted">No runs yet. Run a simulation or upload CSV records.</p>
+            <template x-for="run in runs" :key="run.id">
+                <article class="py-3 border-bottom" style="overflow-wrap:anywhere">
+                    <div class="d-flex flex-wrap justify-content-between gap-2"><strong x-text="run.kind + ' · ' + run.status"></strong><a :href="'/api/runs/' + run.id + '/report.csv'">Download CSV report</a></div>
+                    <div class="small muted">Run <code x-text="run.id"></code> · <span x-text="formatDate(run.created_at)"></span></div>
+                    <p class="small muted" x-show="run.result.transfer">Laptop transfer integrity: <span x-text="run.result.transfer?.integrity || 'pending'"></span> · SHA-256: <code x-text="run.result.transfer?.sha256 || ''"></code></p>
+                    <p class="small muted" x-show="run.result.transfer" x-text="run.result.transfer?.transport || ''"></p>
+                    <p class="small">Model: <strong x-text="run.result.model_name || 'No prediction'"></strong></p>
+                    <p class="my-2"><strong x-text="run.result.model_prediction || 'No prediction'"></strong> · Risk <span x-text="run.result.risk_score ?? '—'"></span>/100 · Incident <span x-text="run.incident?.id ?? 'None'"></span></p>
+                    <p class="small" x-show="run.result.error" x-text="run.result.error"></p>
+                    <p class="small muted" x-show="run.result.observed_file_activity" x-text="'Recorded activity summary: ' + JSON.stringify(run.result.observed_file_activity || {})"></p>
+                    <template x-if="run.result.metrics"><p class="small muted">Accuracy <span x-text="metric(run.result.metrics.accuracy)"></span> · Precision <span x-text="metric(run.result.metrics.precision)"></span> · Recall <span x-text="metric(run.result.metrics.recall)"></span> · F1 <span x-text="metric(run.result.metrics.f1)"></span> · <span x-text="run.result.windows"></span> <span x-text="run.result.record_unit || 'windows'"></span></p></template>
+                    <template x-if="run.incident"><div class="small">
+                        <p x-text="run.incident.details"></p>
+                        <p>Quarantine: <strong x-text="run.incident.response?.quarantine || 'pending / incomplete'"></strong> · Email: <span x-text="run.incident.response?.notifications?.email || 'pending'"></span> · Webhook: <span x-text="run.incident.response?.notifications?.webhook || 'pending'"></span></p>
+                        <details><summary>Observed activity and file response details</summary><pre style="white-space:pre-wrap" x-text="JSON.stringify(run.incident.response?.files || [], null, 2)"></pre></details>
+                    </div></template>
+                    <details class="small muted" x-show="run.result.limitations"><summary>Evaluation limitations</summary><span x-text="(run.result.limitations || []).join(' ')"></span></details>
+                </article>
+            </template>
+        </section>
+        <div class="row g-4 mb-4">
+            <div class="col-sm-6 col-xl-3">
+                <article class="status-card">
+                    <div class="d-flex justify-content-between"><span class="status-icon"><i class="bi bi-activity"></i></span><span class="state-badge" :class="status.running ? 'running' : ''"><span class="state-dot"></span><span x-text="status.connection_state"></span></span></div>
+                    <div class="metric-value mt-4" x-text="status.running ? 'Live' : 'Offline'"></div><span class="muted small">Monitoring agent</span>
+                </article>
+            </div>
+            <div class="col-sm-6 col-xl-3">
+                <article class="status-card">
+                    <div class="d-flex justify-content-between"><span class="status-icon"><i class="bi bi-cpu"></i></span><span class="state-badge" x-text="status.model_state"></span></div>
+                    <div class="metric-value mt-4"><span x-text="status.cpu_percent"></span><small class="fs-6">%</small></div><span class="muted small">Current CPU usage</span>
+                    <div class="progress-track mt-3"><div class="progress-value" :style="`width:${status.cpu_percent}%`"></div></div>
+                </article>
+            </div>
+            <div class="col-sm-6 col-xl-3">
+                <article class="status-card">
+                    <div class="d-flex justify-content-between"><span class="status-icon"><i class="bi bi-collection"></i></span><span class="state-badge">Persisted</span></div>
+                    <div class="metric-value mt-4" x-text="eventCount"></div><span class="muted small">Behavioral events</span>
+                    <div class="small muted mt-2"><span x-text="status.process_count"></span> active processes</div>
+                </article>
+            </div>
+            <div class="col-sm-6 col-xl-3">
+                <article class="status-card">
+                    <div class="d-flex justify-content-between"><span class="status-icon"><i class="bi bi-bell"></i></span><span class="state-badge" :class="alertCount ? '' : 'running'" x-text="alertCount ? 'Review' : 'Clear'"></span></div>
+                    <div class="metric-value mt-4" :style="status.canary_triggered ? 'color:var(--danger)' : ''" x-text="status.canary_triggered ? 'TRIGGERED' : 'Armed'"></div><span class="muted small">Canary status · <span x-text="status.canary_files"></span> files</span>
+                    <div class="small muted mt-2">Background monitor risk: <span x-text="status.last_risk_score"></span>/100</div>
+                </article>
+            </div>
+        </div>
+
+        <div class="row g-4 mb-4">
+            <div class="col-lg-8">
+                <section class="panel h-100">
+                    <div class="p-4 d-flex justify-content-between align-items-start border-bottom" style="border-color:var(--line)!important">
+                        <div><small class="muted">LIVE ACTIVITY</small><h2 class="h4 mt-1 mb-1">Monitoring events</h2><span class="muted small">Updated automatically every few seconds</span></div>
+                        <button class="theme-toggle" type="button" @click="refreshAll" :disabled="busy" aria-label="Refresh data"><i class="bi bi-arrow-clockwise" :class="busy ? 'd-inline-block spin' : ''"></i></button>
+                    </div>
+
+                    <div class="px-4" x-show="events.length">
+                        <template x-for="event in events" :key="event.id">
+                            <article class="feed-row">
+                                <span class="feed-icon" :class="event.severity"><i class="bi" :class="event.severity === 'warning' ? 'bi-exclamation-triangle' : 'bi-folder-check'"></i></span>
+                                <div><strong class="d-block" x-text="event.event_type.replaceAll('_', ' ')"></strong><p class="muted small mb-1" x-text="event.details"></p><span class="muted" style="font-size:.72rem" x-text="formatDate(event.created_at)"></span></div>
+                                <span class="state-badge" x-text="`${event.risk_score}/100`"></span>
+                            </article>
+                        </template>
+                    </div>
+
+                    <div class="empty-state" x-show="!events.length">
+                        <div><span class="status-icon mx-auto mb-3"><i class="bi bi-inbox"></i></span><h3 class="h5">No events recorded</h3><p class="muted small mb-0">Start monitoring, then run the safe demo to generate a harmless file-activity event.</p></div>
+                    </div>
+                </section>
+            </div>
+
+            <div class="col-lg-4">
+                <section class="panel p-4 h-100">
+                    <small class="muted">DECOY SERVER</small><h2 class="h4 mt-1">Synthetic organization data</h2>
+                    <p class="muted small">This isolated honeypot contains only dummy assets. It never scans personal files or executes malware.</p>
+                    <div class="safe-note mt-3"><i class="bi bi-folder2-open me-2" style="color:var(--accent)"></i><code style="color:var(--text)" x-text="status.target"></code></div>
+                    <div class="d-flex flex-wrap gap-2 mt-3"><template x-for="directory in status.decoy_directories" :key="directory"><span class="state-badge"><i class="bi bi-folder"></i><span x-text="directory"></span></span></template></div>
+                    <hr class="my-4" style="border-color:var(--line)">
+                    <div class="d-flex justify-content-between mb-3"><span class="muted small">Last file burst</span><strong class="small"><span x-text="status.last_activity?.files_touched || 0"></span> files</strong></div>
+                    <div class="d-flex justify-content-between mb-3"><span class="muted small">Operation rate</span><strong class="small"><span x-text="status.last_activity?.operation_rate || 0"></span>/s</strong></div>
+                    <div class="d-flex justify-content-between mb-3"><span class="muted small">Directories touched</span><strong class="small" x-text="status.last_activity?.directories_touched || 0"></strong></div>
+                    <div class="d-flex justify-content-between mb-3"><span class="muted small">Memory usage</span><strong class="small"><span x-text="status.memory_percent"></span>%</strong></div>
+                    <div class="progress-track"><div class="progress-value" :style="`width:${status.memory_percent}%`"></div></div>
+                    <div class="d-flex justify-content-between mt-4"><span class="muted small">Last system check</span><strong class="small" x-text="status.last_check ? formatDate(status.last_check) : 'Not started'"></strong></div>
+                    <div class="d-flex justify-content-between mt-3"><span class="muted small">Polling interval</span><strong class="small"><span x-text="status.interval_seconds"></span> seconds</strong></div>
+                </section>
+            </div>
+        </div>
+
+        <section class="panel">
+            <div class="p-4 border-bottom" style="border-color:var(--line)!important"><small class="muted">ALERT REVIEW</small><h2 class="h4 mt-1 mb-0">Detected activity alerts</h2></div>
+            <div class="px-4" x-show="alerts.length">
+                <template x-for="alert in alerts" :key="alert.id">
+                    <article class="feed-row">
+                        <span class="feed-icon" :class="alert.severity"><i class="bi bi-shield-exclamation"></i></span>
+                        <div>
+                            <strong class="d-block" x-text="alert.title"></strong>
+                            <p class="small mb-1">Incident #<span x-text="alert.id"></span> · Risk <span x-text="alert.risk_score"></span>/100 · Suspicious · <a :href="'/api/alerts/' + alert.id + '/report.csv'">Download CSV</a></p>
+                            <p class="muted small mb-1" x-text="alert.details"></p>
+                            <template x-if="alert.response">
+                                <div class="small mt-2">
+                                    <strong x-text="alert.response.completed ? 'Automated response processed' : 'Response incomplete — review required'"></strong>
+                                    <p class="mb-1" x-text="`${(alert.response.files || []).filter(f => f.status === 'quarantined').length} files quarantined; ${(alert.response.files || []).filter(f => f.status === 'failed').length} files could not be moved.${alert.response.quarantine === 'disabled' ? ' Quarantine disabled.' : ''}`"></p>
+                                    <p class="muted mb-1" x-text="Object.entries(alert.response.notifications || {}).map(([name, state]) => `${name}: ${state}`).join(' · ')"></p>
+                                    <details x-show="(alert.response.files || []).length">
+                                        <summary>File response details</summary>
+                                        <template x-for="file in alert.response.files || []" :key="file.source">
+                                            <p class="muted mb-1" x-text="`${file.source}: ${file.status}${file.error ? ' — ' + file.error : ''}`"></p>
+                                        </template>
+                                    </details>
+                                </div>
+                            </template>
+                            <span class="muted" style="font-size:.72rem" x-text="formatDate(alert.created_at)"></span>
+                        </div>
+                        <button class="btn-outline-custom py-2 px-3" type="button" @click="acknowledgeAlert(alert.id)" :disabled="alert.acknowledged" x-text="alert.acknowledged ? 'Reviewed' : 'Acknowledge'"></button>
+                    </article>
+                </template>
+            </div>
+            <div class="empty-state" x-show="!alerts.length"><div><span class="status-icon mx-auto mb-3"><i class="bi bi-shield-check"></i></span><h3 class="h5">No alerts</h3><p class="muted small mb-0">Unusual activity detected by the behavioral model will appear here.</p></div></div>
+        </section>
+    </div>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function monitorDashboard() {
+        return {
+            csrfToken: document.querySelector('meta[name="csrf-token"]').content,
+            busy: false,
+            feedback: '',
+            feedbackType: 'info',
+            eventCount: 0,
+            alertCount: 0,
+            events: [],
+            alerts: [],
+            runs: [],
+            model: {},
+            publishedModel: {},
+            notifications: {email: 'loading', webhook: 'loading', configuration: ''},
+            datasetName: 'Independent telemetry',
+            datasetSource: '',
+            refreshTimer: null,
+            status: {
+                running: false,
+                connection_state: 'Loading',
+                model_state: 'Loading model',
+                target: 'instance/decoy_server',
+                decoy_directories: [],
+                interval_seconds: 2,
+                cpu_percent: 0,
+                memory_percent: 0,
+                process_count: 0,
+                last_check: null,
+                last_risk_score: 0,
+                canary_triggered: false,
+                canary_files: 0,
+                last_activity: {}
+            },
+            init() {
+                this.refreshAll();
+                this.refreshTimer = window.setInterval(() => this.refreshAll(false), 3000);
+            },
+            destroy() {
+                window.clearInterval(this.refreshTimer);
+            },
+            async fetchJson(url, options = {}) {
+                const headers = {Accept: 'application/json', ...(options.headers || {})};
+                if ((options.method || 'GET') !== 'GET') headers['X-CSRFToken'] = this.csrfToken;
+                const response = await fetch(url, {...options, headers});
+                if (response.redirected) {
+                    window.location.href = response.url;
+                    throw new Error('Your session has expired.');
+                }
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.message || 'The request could not be completed.');
+                return data;
+            },
+            async refreshAll(showBusy = true) {
+                if (showBusy) this.busy = true;
+                try {
+                    const [summary, eventData, alertData, runData, notificationData] = await Promise.all([
+                        this.fetchJson('{{ url_for("api.monitor_status") }}'),
+                        this.fetchJson('{{ url_for("api.list_events", limit=12) }}'),
+                        this.fetchJson('{{ url_for("api.list_alerts", limit=8) }}'),
+                        this.fetchJson('/api/runs'),
+                        this.fetchJson('/api/notifications')
+                    ]);
+                    this.status = summary.status;
+                    this.model = summary.model;
+                    this.publishedModel = summary.published_model;
+                    this.eventCount = summary.event_count;
+                    this.alertCount = summary.alert_count;
+                    this.events = eventData.events;
+                    this.alerts = alertData.alerts;
+                    this.runs = runData.runs;
+                    this.notifications = notificationData;
+                } catch (error) {
+                    this.showFeedback(error.message, 'error');
+                } finally {
+                    if (showBusy) this.busy = false;
+                }
+            },
+            async performAction(url) {
+                this.busy = true;
+                try {
+                    const data = await this.fetchJson(url, {method: 'POST'});
+                    this.showFeedback(data.message, data.ok ? 'info' : 'error');
+                    await this.refreshAll(false);
+                    return data;
+                } catch (error) {
+                    this.showFeedback(error.message, 'error');
+                    return null;
+                } finally {
+                    this.busy = false;
+                }
+            },
+            startMonitor() { return this.performAction('{{ url_for("api.start_monitor") }}'); },
+            metric(value) { return value == null ? 'undefined' : (value * 100).toFixed(2) + '%'; },
+            async uploadDataset() {
+                this.busy = true;
+                try {
+                    const body = new FormData();
+                    body.append('dataset', this.$refs.datasetFile.files[0]);
+                    body.append('dataset_name', this.datasetName);
+                    body.append('source', this.datasetSource);
+                    const data = await this.fetchJson('/api/runs/dataset', {method: 'POST', body});
+                    this.showFeedback(data.message);
+                } catch (error) { this.showFeedback(error.message, 'error'); }
+                finally { await this.refreshAll(false); this.busy = false; }
+            },
+            stopMonitor() { return this.performAction('{{ url_for("api.stop_monitor") }}'); },
+            async runDemo() {
+                const result = await this.performAction('{{ url_for("api.run_safe_demo") }}');
+                if (result && result.ok) window.setTimeout(() => this.refreshAll(false), 2500);
+            },
+            async acknowledgeAlert(alertId) {
+                await this.performAction(`/api/alerts/${alertId}/acknowledge`);
+            },
+            showFeedback(message, type = 'info') {
+                this.feedback = message;
+                this.feedbackType = type;
+            },
+            formatDate(value) {
+                if (!value) return 'Not available';
+                return new Intl.DateTimeFormat(undefined, {dateStyle: 'medium', timeStyle: 'short'}).format(new Date(value));
+            }
+        };
+    }
+</script>
+{% endblock %}
