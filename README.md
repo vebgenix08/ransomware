@@ -22,6 +22,31 @@ Multi-page Flask foundation for the RansomShield behavioral ransomware detection
 
 ## October 2026 workflow update
 
+### Upgrade notes (2026-10-19)
+
+- **`SECRET_KEY` is required.** Add a long random value to `.env`; the app
+  refuses to start without it. Generate one with
+  `python -c "import secrets; print(secrets.token_hex(32))"`.
+- **Migrations replace automatic table creation.** Existing databases are
+  stamped at revision `0001_baseline` and upgraded in place; no data is dropped.
+  Fresh installs run `0001` → `0003` on first start.
+- **Serving.** `python run.py` now serves waitress on `127.0.0.1:5000`.
+  Set `FLASK_DEBUG=true` only for local development.
+- **Monitoring.** Windows file notifications feed a bounded queue; a full
+  snapshot sweep runs every `MONITOR_RECONCILE_SECONDS` (default 30) to catch
+  anything the notifications missed. Dropped events are counted and shown on
+  the dashboard.
+- **Quarantine is reversible.** `QUARANTINE_MODE=dry-run` records what would be
+  moved without touching files. Restore verifies the stored SHA-256, the
+  original path and the destination before moving anything back.
+- **Downloads.** `/downloads` lists packaged releases with checksums. Build one
+  with `python scripts/build_release.py --version 1.1.0`; credentials and the
+  local database are never packaged.
+- **Offline assets.** Bootstrap, Bootstrap Icons and Alpine are vendored under
+  `app/static/vendor/`; the dashboard no longer requires internet access.
+
+### Earlier workflow
+
 Restart the application after updating. New tables are created automatically;
 existing users, alerts and events are retained. See [ROADMAP.md](ROADMAP.md) for
 verified work and remaining external dependencies.
