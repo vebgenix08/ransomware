@@ -77,6 +77,7 @@ def create_app(test_config: Optional[dict] = None) -> Flask:
         MAX_CONTENT_LENGTH=5 * 1024 * 1024,
         RUNS_PATH=str(Path(app.instance_path) / "runs"),
         AUTO_QUARANTINE=os.environ.get("AUTO_QUARANTINE", "true").lower() == "true",
+        QUARANTINE_MODE=os.environ.get("QUARANTINE_MODE", "enabled").lower(),
         QUARANTINE_PATH=str(Path(app.instance_path) / "quarantine"),
         RESPONSE_WEBHOOK_URL=os.environ.get("RESPONSE_WEBHOOK_URL", ""),
         RESPONSE_EMAIL_TO=os.environ.get("RESPONSE_EMAIL_TO", ""),

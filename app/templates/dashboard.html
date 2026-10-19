@@ -213,6 +213,28 @@
             </div>
             <div class="empty-state" x-show="!alerts.length"><div><span class="status-icon mx-auto mb-3"><i class="bi bi-shield-check"></i></span><h3 class="h5">No alerts</h3><p class="muted small mb-0">Unusual activity detected by the behavioral model will appear here.</p></div></div>
         </section>
+
+        <section class="panel mt-4">
+            <div class="p-4 border-bottom d-flex flex-wrap justify-content-between align-items-center gap-2" style="border-color:var(--line)!important">
+                <div><small class="muted">QUARANTINE</small><h2 class="h4 mt-1 mb-0">Contained files</h2></div>
+                <button class="theme-toggle" type="button" @click="loadQuarantine" :disabled="busy" aria-label="Refresh quarantine"><i class="bi bi-arrow-clockwise"></i></button>
+            </div>
+            <p class="px-4 pt-3 muted small mb-0">Restoring verifies the file hash, the recorded original path and the destination before moving anything back.</p>
+            <div class="px-4 pb-3" x-show="quarantine.length">
+                <template x-for="item in quarantine" :key="item.id">
+                    <article class="feed-row">
+                        <span class="feed-icon"><i class="bi bi-lock"></i></span>
+                        <div style="overflow-wrap:anywhere">
+                            <strong class="d-block" x-text="item.original_path"></strong>
+                            <p class="muted small mb-1">Incident #<span x-text="item.alert_id"></span> · <span x-text="item.size_bytes"></span> bytes · SHA-256 <code x-text="item.sha256.slice(0, 16) + '…'"></code></p>
+                            <span class="muted" style="font-size:.72rem" x-text="item.restored_at ? 'Restored ' + formatDate(item.restored_at) : 'Quarantined ' + formatDate(item.quarantined_at)"></span>
+                        </div>
+                        <button class="btn-outline-custom py-2 px-3" type="button" @click="restoreItem(item.id)" :disabled="busy || item.restored_at" x-text="item.restored_at ? 'Restored' : 'Restore'"></button>
+                    </article>
+                </template>
+            </div>
+            <div class="empty-state" x-show="!quarantine.length"><div><span class="status-icon mx-auto mb-3"><i class="bi bi-archive"></i></span><h3 class="h5">Nothing quarantined</h3><p class="muted small mb-0">Files moved by an authorised containment action appear here with their hashes.</p></div></div>
+        </section>
     </div>
 </main>
 {% endblock %}
@@ -230,6 +252,7 @@
             events: [],
             alerts: [],
             runs: [],
+            quarantine: [],
             model: {},
             publishedModel: {},
             notifications: {email: 'loading', webhook: 'loading', configuration: ''},
@@ -274,12 +297,13 @@
             async refreshAll(showBusy = true) {
                 if (showBusy) this.busy = true;
                 try {
-                    const [summary, eventData, alertData, runData, notificationData] = await Promise.all([
+                    const [summary, eventData, alertData, runData, notificationData, quarantineData] = await Promise.all([
                         this.fetchJson('{{ url_for("api.monitor_status") }}'),
                         this.fetchJson('{{ url_for("api.list_events", limit=12) }}'),
                         this.fetchJson('{{ url_for("api.list_alerts", limit=8) }}'),
                         this.fetchJson('/api/runs'),
-                        this.fetchJson('/api/notifications')
+                        this.fetchJson('/api/notifications'),
+                        this.fetchJson('/api/quarantine')
                     ]);
                     this.status = summary.status;
                     this.model = summary.model;
@@ -289,6 +313,7 @@
                     this.events = eventData.events;
                     this.alerts = alertData.alerts;
                     this.runs = runData.runs;
+                    this.quarantine = quarantineData.items;
                     this.notifications = notificationData;
                 } catch (error) {
                     this.showFeedback(error.message, 'error');
@@ -331,6 +356,18 @@
             },
             async acknowledgeAlert(alertId) {
                 await this.performAction(`/api/alerts/${alertId}/acknowledge`);
+            },
+            async loadQuarantine() {
+                try {
+                    const data = await this.fetchJson('/api/quarantine');
+                    this.quarantine = data.items;
+                } catch (error) {
+                    this.showFeedback(error.message, 'error');
+                }
+            },
+            async restoreItem(itemId) {
+                const result = await this.performAction(`/api/quarantine/${itemId}/restore`);
+                if (result && result.ok) await this.loadQuarantine();
             },
             showFeedback(message, type = 'info') {
                 this.feedback = message;

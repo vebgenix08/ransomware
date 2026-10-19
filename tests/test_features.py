@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import json
 import tempfile
 import unittest
@@ -8,9 +9,9 @@ from unittest.mock import patch
 from app import create_app
 from app.detector import FEATURE_NAMES
 from app.extensions import db
-from app.models import Alert, ResponseAction, User
+from app.models import Alert, QuarantineItem, ResponseAction, User
 from app.monitor import take_snapshot
-from app.response import respond
+from app.response import respond, restore_quarantine
 from scripts.evaluate_external import evaluate
 
 MODEL = Path(__file__).resolve().parents[1] / "app/artifacts/behavioral_model.json"
@@ -191,3 +192,69 @@ class EvaluationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RestoreTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.app = create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite://",
+            "MONITOR_TARGET_PATH": self.root / "decoy", "QUARANTINE_PATH": self.root / "quarantine",
+            "RESPONSE_WEBHOOK_URL": "", "RESPONSE_EMAIL_TO": ""})
+        self.context = self.app.app_context()
+        self.context.push()
+        self.addCleanup(self.context.pop)
+        self.monitor = self.app.extensions["monitoring_service"]
+
+    def quarantined(self, content=b"evidence"):
+        target = self.monitor.target_path / "restore.txt"
+        target.write_text(content.decode())
+        alert = Alert(title="Restore", details="Synthetic", severity="high", risk_score=95)
+        db.session.add(alert)
+        db.session.commit()
+        respond(self.app, alert, self.monitor.target_path, {"restore.txt"})
+        item = QuarantineItem.query.one()
+        return alert, item
+
+    def test_restore_returns_file_and_records_time(self):
+        _, item = self.quarantined()
+        restore_quarantine(self.app, item, self.monitor.target_path)
+        self.assertEqual((self.monitor.target_path / "restore.txt").read_text(), "evidence")
+        self.assertFalse(Path(item.quarantine_path).exists())
+        self.assertIsNotNone(item.restored_at)
+        with self.assertRaises(ValueError):
+            restore_quarantine(self.app, item, self.monitor.target_path)
+
+    def test_tampered_quarantined_file_is_refused(self):
+        _, item = self.quarantined()
+        Path(item.quarantine_path).write_text("changed")
+        with self.assertRaises(ValueError):
+            restore_quarantine(self.app, item, self.monitor.target_path)
+        self.assertTrue(Path(item.quarantine_path).exists())
+
+    def test_existing_destination_blocks_restore(self):
+        _, item = self.quarantined()
+        (self.monitor.target_path / "restore.txt").write_text("newer file")
+        with self.assertRaises(ValueError):
+            restore_quarantine(self.app, item, self.monitor.target_path)
+        self.assertEqual((self.monitor.target_path / "restore.txt").read_text(), "newer file")
+
+    def test_dry_run_records_without_moving(self):
+        self.app.config["QUARANTINE_MODE"] = "dry-run"
+        target = self.monitor.target_path / "keep.txt"
+        target.write_text("keep")
+        alert = Alert(title="Dry", details="Synthetic", severity="high", risk_score=95)
+        db.session.add(alert)
+        db.session.commit()
+        action = respond(self.app, alert, self.monitor.target_path, {"keep.txt"})
+        self.assertTrue(target.exists())
+        self.assertEqual(action.result["quarantine"], "dry_run")
+        self.assertEqual(action.result["files"][0]["status"], "would_quarantine")
+        self.assertEqual(QuarantineItem.query.count(), 0)
+
+    def test_quarantine_item_records_hash_and_source(self):
+        _, item = self.quarantined(b"hashed")
+        self.assertEqual(item.sha256, hashlib.sha256(b"hashed").hexdigest())
+        self.assertEqual(item.original_path, "restore.txt")
+        self.assertEqual(item.size_bytes, len(b"hashed"))

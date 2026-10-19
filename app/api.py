@@ -9,7 +9,7 @@ from flask_login import login_required, current_user
 from werkzeug.datastructures import FileStorage
 
 from .extensions import db
-from .models import Alert, MonitoringEvent, AnalysisRun
+from .models import Alert, MonitoringEvent, AnalysisRun, QuarantineItem
 from .runs import start_run, execute
 
 
@@ -208,6 +208,28 @@ def incident_report(alert_id):
     return csv_download([["alert_id", "timestamp", "risk_score", "model_prediction", "observed_file_activity", "quarantine_results", "notification_status"],
                          [alert.id, alert.to_dict()["created_at"], alert.risk_score, "suspicious", alert.details,
                           json.dumps(alert.to_dict()["response"]), json.dumps((alert.to_dict()["response"] or {}).get("notifications", {}))]], f"incident-{alert.id}.csv")
+
+
+@api.get("/quarantine")
+@login_required
+def list_quarantine():
+    hidden = db.select(AnalysisRun.alert_id).where(AnalysisRun.user_id != current_user.id, AnalysisRun.alert_id.isnot(None))
+    items = (QuarantineItem.query.filter(QuarantineItem.alert_id.notin_(hidden))
+             .order_by(QuarantineItem.quarantined_at.desc()).limit(100).all())
+    return jsonify(items=[item.to_dict() for item in items])
+
+
+@api.post("/quarantine/<int:item_id>/restore")
+@login_required
+def restore_item(item_id: int):
+    item = db.get_or_404(QuarantineItem, item_id)
+    check_alert_owner(item.alert_id)
+    from .response import restore_quarantine
+    try:
+        restore_quarantine(current_app, item, Path(current_app.config["MONITOR_TARGET_PATH"]))
+    except (OSError, ValueError) as exc:
+        return jsonify(ok=False, message=str(exc), item=item.to_dict()), 422
+    return jsonify(ok=True, message=f"Restored {item.original_path}.", item=item.to_dict())
 
 
 @api.get("/notifications")

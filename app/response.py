@@ -1,16 +1,28 @@
 """Audited containment of files in the configured decoy directory."""
+import hashlib
 import json
 import os
 import smtplib
 import ssl
 import stat
+from datetime import datetime, timezone
 from email.message import EmailMessage
 from pathlib import Path
 from urllib.request import Request, urlopen
+
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.attributes import flag_modified
 
 from .extensions import db
-from .models import ResponseAction
+from .models import QuarantineItem, ResponseAction
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def respond(app, alert, root, affected, quarantine_allowed=True):
@@ -19,17 +31,24 @@ def respond(app, alert, root, affected, quarantine_allowed=True):
         return existing
     action = ResponseAction(alert_id=alert.id, result={"files": [], "notifications": {}})
     db.session.add(action)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # Another thread created the action for this alert first; use theirs.
+        db.session.rollback()
+        return ResponseAction.query.filter_by(alert_id=alert.id).one()
     result = action.result
     root = Path(root).resolve()
     quarantine = Path(app.config["QUARANTINE_PATH"]).resolve()
     if quarantine == root or root in quarantine.parents or quarantine in root.parents:
         raise ValueError("Quarantine and monitored directories must be separate")
+    dry_run = app.config.get("QUARANTINE_MODE") == "dry-run"
     if app.config["AUTO_QUARANTINE"] and quarantine_allowed:
         destination = quarantine / str(alert.id)
-        destination.mkdir(parents=True, exist_ok=True)
-        if destination.resolve() != destination:
-            raise ValueError("Quarantine destination must not contain links")
+        if not dry_run:
+            destination.mkdir(parents=True, exist_ok=True)
+            if destination.resolve() != destination:
+                raise ValueError("Quarantine destination must not contain links")
         for name in sorted(affected):
             record = {"source": name}
             try:
@@ -49,14 +68,28 @@ def respond(app, alert, root, affected, quarantine_allowed=True):
                 if not stat.S_ISREG(source.stat().st_mode):
                     raise ValueError("Only regular files can be quarantined")
                 target = destination / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                if target.parent.resolve() != target.parent:
-                    raise ValueError("Quarantine destination must not contain links")
-                if target.exists():
-                    raise ValueError("Destination already exists")
-                # Same-filesystem rename avoids copying partially modified files.
-                os.rename(source, target)
-                record.update(status="quarantined", destination=str(target))
+                digest = sha256_file(source)
+                size = source.stat().st_size
+                if dry_run:
+                    record.update(status="would_quarantine", destination=str(target), sha256=digest)
+                else:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    if target.parent.resolve() != target.parent:
+                        raise ValueError("Quarantine destination must not contain links")
+                    if target.exists():
+                        raise ValueError("Destination already exists")
+                    # Same-filesystem rename avoids copying partially modified files.
+                    os.rename(source, target)
+                    db.session.add(
+                        QuarantineItem(
+                            alert_id=alert.id,
+                            original_path=relative.as_posix(),
+                            quarantine_path=str(target),
+                            sha256=digest,
+                            size_bytes=size,
+                        )
+                    )
+                    record.update(status="quarantined", destination=str(target), sha256=digest)
             except (OSError, ValueError) as exc:
                 record.update(status="failed", error=str(exc))
             result["files"].append(record)
@@ -66,8 +99,13 @@ def respond(app, alert, root, affected, quarantine_allowed=True):
     else:
         result["quarantine"] = "disabled" if not app.config["AUTO_QUARANTINE"] else "below_quarantine_threshold"
     if "quarantine" not in result:
-        result["quarantine"] = ("partial_failure" if any(f["status"] == "failed" for f in result["files"])
-                                else "quarantined" if result["files"] else "no_files")
+        statuses = {item["status"] for item in result["files"]}
+        if "would_quarantine" in statuses:
+            result["quarantine"] = "dry_run"
+        elif "failed" in statuses:
+            result["quarantine"] = "partial_failure"
+        else:
+            result["quarantine"] = "quarantined" if result["files"] else "no_files"
     payload = {"alert": alert.to_dict(), "files": result["files"]}
     config = app.config
     for channel in ("webhook", "email"):
@@ -115,3 +153,38 @@ def respond(app, alert, root, affected, quarantine_allowed=True):
     action.completed = True
     db.session.commit()
     return action
+
+
+def restore_quarantine(app, item: QuarantineItem, monitored_root: Path) -> QuarantineItem:
+    """Move one quarantined file back, verifying identity and destination first.
+
+    Raises ValueError with a specific reason when any check fails, leaving both
+    the quarantine copy and the database untouched.
+    """
+    if item.restored_at is not None:
+        raise ValueError("This file has already been restored")
+    quarantine = Path(app.config["QUARANTINE_PATH"]).resolve()
+    root = Path(monitored_root).resolve()
+    source = Path(item.quarantine_path).resolve()
+    if quarantine not in source.parents:
+        raise ValueError("Quarantined file is outside the quarantine directory")
+    info = source.lstat()
+    if source.is_symlink() or getattr(info, "st_file_attributes", 0) & 0x400:
+        raise ValueError("Quarantined file must not be a link")
+    if not stat.S_ISREG(info.st_mode):
+        raise ValueError("Only regular files can be restored")
+    if sha256_file(source) != item.sha256:
+        raise ValueError("Quarantined file changed since containment; refusing to restore")
+    relative = Path(item.original_path)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ValueError("Recorded original path is unsafe")
+    destination = (root / relative).resolve()
+    if root not in destination.parents:
+        raise ValueError("Original path is outside the monitored directory")
+    if destination.exists():
+        raise ValueError("A file already exists at the original path")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    os.rename(source, destination)
+    item.restored_at = datetime.now(timezone.utc)
+    db.session.commit()
+    return item
