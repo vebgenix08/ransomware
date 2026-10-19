@@ -177,6 +177,9 @@
                     <div class="d-flex justify-content-between mb-3"><span class="muted small">Memory usage</span><strong class="small"><span x-text="status.memory_percent"></span>%</strong></div>
                     <div class="progress-track"><div class="progress-value" :style="`width:${status.memory_percent}%`"></div></div>
                     <div class="d-flex justify-content-between mt-4"><span class="muted small">Last system check</span><strong class="small" x-text="status.last_check ? formatDate(status.last_check) : 'Not started'"></strong></div>
+                    <div class="d-flex justify-content-between mt-3"><span class="muted small">Collector</span><strong class="small" x-text="status.collector === 'watchdog' ? 'Windows events' : 'Snapshot polling'"></strong></div>
+                    <div class="d-flex justify-content-between mt-3"><span class="muted small">Dropped events</span><strong class="small" :style="status.dropped_events ? 'color:var(--accent)' : ''" x-text="status.dropped_events || 0"></strong></div>
+                    <div class="d-flex justify-content-between mt-3"><span class="muted small">Last successful scan</span><strong class="small" x-text="status.last_successful_scan ? formatDate(status.last_successful_scan) : 'Not started'"></strong></div>
                     <div class="d-flex justify-content-between mt-3"><span class="muted small">Polling interval</span><strong class="small"><span x-text="status.interval_seconds"></span> seconds</strong></div>
                 </section>
             </div>

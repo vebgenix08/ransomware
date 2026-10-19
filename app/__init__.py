@@ -120,4 +120,9 @@ def create_app(test_config: Optional[dict] = None) -> Flask:
     else:
         _run_migrations(app)
 
+    with app.app_context():
+        from .registry import register_models
+
+        register_models(app)
+
     return app

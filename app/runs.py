@@ -51,6 +51,12 @@ def execute(app, run, upload=None, dataset_name="Safe simulation", source="local
                 writer.writeheader()
                 writer.writerow(dict(trace_id=run.id, window_index=0, label=1, **features))
         report = evaluate(csv_path, Path(app.root_path)/"artifacts/behavioral_model.json", dataset_name, source)
+        from .models import ModelRegistry
+        from .registry import _sha256
+        artifact = Path(app.root_path)/("artifacts/mlran/model.json" if report.get("dataset_schema") == "mlran" else "artifacts/behavioral_model.json")
+        record = ModelRegistry.query.filter_by(artifact_sha256=_sha256(artifact)).first()
+        model_label = f"{record.display_name}@{record.artifact_sha256[:12]}" if record else "unregistered"
+        report["model_version"] = model_label
         if run.result.get("transfer"):
             report["transfer"] = run.result["transfer"]
         suspicious = [p for p in report["predictions"] if p["prediction"] == 1]
@@ -72,7 +78,10 @@ def execute(app, run, upload=None, dataset_name="Safe simulation", source="local
                     (samples/name).write_text(f"Harmless stand-in for CSV window {prediction['window_index']}; no executable content.\n", encoding="utf-8")
                     affected.add(name)
             alert = Alert(title=f"Suspicious {run.kind} activity", severity="high" if report["risk_score"] >= 85 else "medium",
-                          risk_score=report["risk_score"], details=f"Run {run.id}: {len(suspicious)} of {report['windows']} {report.get('record_unit', 'windows')} classified suspicious by {report.get('model_name', 'TCN + XGBoost')}.")
+                          risk_score=report["risk_score"], model_version=model_label,
+                          rule_trace=[{"signal": "model_probability", "value": report["risk_score"]},
+                                      {"signal": "suspicious_windows", "value": len(suspicious)}],
+                          details=f"Run {run.id}: {len(suspicious)} of {report['windows']} {report.get('record_unit', 'windows')} classified suspicious by {report.get('model_name', 'TCN + XGBoost')}.")
             db.session.add(alert)
             db.session.flush()
             run.alert_id = alert.id

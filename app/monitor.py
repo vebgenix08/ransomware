@@ -436,7 +436,11 @@ class MonitoringService:
                     severity=severity,
                     risk_score=risk_score,
                     model_version=self.detector.display_name,
-                    rule_trace=[{"signal": "risk_score", "value": risk_score}],
+                    rule_trace=[
+                        {"signal": "files_touched", "value": len(affected or ())},
+                        {"signal": "canary_accessed", "value": bool(set(affected or ()) & CANARY_NAMES)},
+                        {"signal": "risk_score", "value": risk_score},
+                    ],
                 )
             db.session.add(alert)
             db.session.commit()
