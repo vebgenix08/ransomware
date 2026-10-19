@@ -55,7 +55,7 @@ class RunTests(unittest.TestCase):
         self.assertEqual(run['status'], 'completed')
         files = run['incident']['response']['files']
         self.assertEqual(sum(f['status'] == 'quarantined' for f in files), 27)
-        self.assertEqual(sum(f['status'] == 'failed' for f in files), 5)
+        self.assertEqual(sum(f['status'] == 'failed' for f in files), 0)
         second = self.client.post('/api/monitor/demo').json['run']
         self.assertNotEqual(run['id'], second['id'])
         self.assertEqual(len(self.client.get('/api/runs').json['runs']), 2)

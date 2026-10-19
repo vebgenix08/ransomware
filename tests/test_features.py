@@ -9,6 +9,7 @@ from app import create_app
 from app.detector import FEATURE_NAMES
 from app.extensions import db
 from app.models import Alert, ResponseAction, User
+from app.monitor import take_snapshot
 from app.response import respond
 from scripts.evaluate_external import evaluate
 
@@ -98,7 +99,7 @@ class ResponseTests(unittest.TestCase):
             self.assertEqual(action.result["notifications"]["email"], "failed")
 
     def test_monitor_response_does_not_trigger_own_deletion_alert(self):
-        self.monitor._snapshot = self.monitor._take_snapshot()
+        self.monitor._snapshot = take_snapshot(self.monitor.target_path)
         (self.monitor.target_path / "new.txt").write_text("test")
         with patch.object(self.monitor.detector, "predict_probability", return_value=.95):
             self.monitor._collect_once()
@@ -107,7 +108,7 @@ class ResponseTests(unittest.TestCase):
         self.assertEqual(ResponseAction.query.count(), 1)
 
     def test_medium_risk_does_not_quarantine(self):
-        self.monitor._snapshot = self.monitor._take_snapshot()
+        self.monitor._snapshot = take_snapshot(self.monitor.target_path)
         target = self.monitor.target_path / "new.txt"
         target.write_text("test")
         with patch.object(self.monitor.detector, "predict_probability", return_value=.7):
@@ -118,7 +119,7 @@ class ResponseTests(unittest.TestCase):
         self.assertEqual(ResponseAction.query.one().result["quarantine"], "below_quarantine_threshold")
 
     def test_real_model_demo_quarantines_and_preserves_audit(self):
-        self.monitor._snapshot = self.monitor._take_snapshot()
+        self.monitor._snapshot = take_snapshot(self.monitor.target_path)
         self.monitor.create_safe_demo_files("integration")
         self.monitor._collect_once()
         action = ResponseAction.query.one()

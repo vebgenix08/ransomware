@@ -6,7 +6,7 @@ from uuid import uuid4
 from .detector import FEATURE_NAMES
 from .extensions import db
 from .models import Alert, AnalysisRun
-from .monitor import MonitoringService, CANARY_NAMES
+from .monitor import CANARY_NAMES, DISPOSABLE_NAMES, create_safe_demo_files, seed_decoy_server, take_snapshot
 from .response import respond
 from .mlran import evaluate_dataset as evaluate
 
@@ -29,15 +29,17 @@ def execute(app, run, upload=None, dataset_name="Safe simulation", source="local
         if upload is not None:
             upload.save(csv_path)
         else:
-            simulator = MonitoringService()
-            simulator.target_path = samples
-            simulator._seed_decoy_server()
-            before = simulator._take_snapshot()
-            simulator.create_safe_demo_files(run.id)
-            after = simulator._take_snapshot()
+            seed_decoy_server(samples)
+            before = take_snapshot(samples)
+            create_safe_demo_files(samples, run.id)
+            after = take_snapshot(samples)
             created, deleted = set(after) - set(before), set(before) - set(after)
             modified = {p for p in set(before) & set(after) if before[p] != after[p]}
-            affected = created | modified | deleted
+            # The disposable .tmp files are removed on purpose to simulate a
+            # ransomware burst; they were never quarantinable and must not be
+            # reported as failed response moves.
+            intentional = {path for path in deleted if path in DISPOSABLE_NAMES}
+            affected = (created | modified | deleted) - intentional
             features = dict(created_count=len(created), modified_count=len(modified), deleted_count=len(deleted),
                             cpu_percent=0, memory_percent=0, process_count=0,
                             canary_accessed=int(bool(affected & CANARY_NAMES)),

@@ -36,10 +36,12 @@ class MonitoringEvent(db.Model):
     __tablename__ = "monitoring_events"
 
     id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.String(36), nullable=True, unique=True)
     event_type = db.Column(db.String(50), nullable=False, index=True)
     severity = db.Column(db.String(20), nullable=False, default="info")
     details = db.Column(db.String(500), nullable=False)
     risk_score = db.Column(db.Integer, nullable=False, default=0)
+    source = db.Column(db.String(20), nullable=False, default="poll")
     created_at = db.Column(
         db.DateTime(timezone=True),
         nullable=False,
@@ -50,10 +52,12 @@ class MonitoringEvent(db.Model):
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "event_id": self.event_id,
             "event_type": self.event_type,
             "severity": self.severity,
             "details": self.details,
             "risk_score": self.risk_score,
+            "source": self.source,
             "created_at": utc_isoformat(self.created_at),
         }
 
