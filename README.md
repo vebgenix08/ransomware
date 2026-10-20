@@ -24,7 +24,7 @@ Copy `.env.example` to `.env`, paste the generated value into `SECRET_KEY`, then
 
 ## Use the dashboard
 
-- **Run the SILRAD benchmark:** prepare the dataset once using the command below, then select **Run SILRAD held-out test**. The app trains on the publisher's training split and reports results on its separate test split.
+- **Run the SILRAD benchmark:** select **Prepare benchmark on server**, wait for setup to finish, then select **Run SILRAD held-out test**. The app trains on the publisher's training split and reports results on its separate test split. On Render, set `SILRAD_DATA_DIR` to a persistent-disk path if you have one; otherwise prepare again after a redeploy that clears local files.
 - **Monitor a directory:** set `MONITOR_TARGET_PATH` in `.env` to a directory you control, restart the app, then choose **Start monitoring**. The default is the empty `instance/monitor_target` folder. Start with a disposable test folder. Live alerts use a rolling 30-second window: at least 10 distinct deletions, 20 modifications, or 30 distinct changed files with at least 10 modified or deleted. Each alert includes the observed counts. The score is a heuristic activity indicator, not a probability. Alerts have a 60-second cooldown; rule-based alerts never auto-quarantine files.
 - **Review results:** the dashboard refreshes events, alerts, and runs automatically. SILRAD predictions can be downloaded as a CSV. Dataset analysis never moves local files.
 - **Laptop transfer:** follow [TWO_LAPTOP_SETUP.md](TWO_LAPTOP_SETUP.md) to receive CSVs over SFTP. The receiver validates the transfer manifest and checksum before analysis.
@@ -32,13 +32,13 @@ Copy `.env.example` to `.env`, paste the generated value into `SECRET_KEY`, then
 
 ### SILRAD Sysmon benchmark
 
-The dashboard includes a separate **Run SILRAD held-out test** action. Prepare the local data and project-specific XGBoost model once from the published SILRAD archive:
+The dashboard includes **Prepare benchmark on server** and **Run SILRAD held-out test** actions. The setup fetches the published archive at runtime and stores it under `SILRAD_DATA_DIR` (default `instance/silrad/`). It is not bundled in Git or the Docker image. You can also prepare it locally:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\setup_silrad.py
 ```
 
-This downloads the publisher's separate training and test CSVs into the ignored `instance/silrad/` folder, trains only on `fasttext-trainmodel.csv`, and evaluates only `fasttext-testmodel.csv`. The held-out test split contains 156,841 labeled Sysmon events; the training split contains 39,999. The app provides an aggregate report and a separate row-prediction CSV without copying raw command lines or other Sysmon text into the database. Results are a dataset benchmark, not a live-computer diagnosis. The model is this project's hashed-text XGBoost adaptation; it does not reproduce the paper's reported algorithm, and its 0.60 threshold is fixed rather than calibrated on the test split.
+The setup downloads the publisher's separate training and test CSVs, trains only on `fasttext-trainmodel.csv`, and evaluates only `fasttext-testmodel.csv`. The held-out test split contains 156,841 labeled Sysmon events; the training split contains 39,999. The app provides an aggregate report and a separate row-prediction CSV without copying raw command lines or other Sysmon text into the database. Results are a dataset benchmark, not a live-computer diagnosis. The model is this project's hashed-text XGBoost adaptation; it does not reproduce the paper's reported algorithm, and its 0.60 threshold is fixed rather than calibrated on the test split.
 
 The current run at the fixed 0.60 threshold produced 10.17% recall (1,986 true positives, 17,543 false negatives) on the publisher's held-out split. That is poor detection coverage, so this model is not suitable for live alerts. The source repository does not declare a redistribution license. The setup script keeps the data and derived model local under `instance/`; do not redistribute them without checking the publisher's terms. Source: [SILRAD dataset](https://github.com/JamilIsp/SILRAD-dataset).
 

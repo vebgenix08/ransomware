@@ -200,6 +200,21 @@ class RunTests(unittest.TestCase):
         self.assertTrue(status.json['ready'])
         self.assertAlmostEqual(status.json['metrics']['recall'], 1986 / 19529)
 
+    def test_silrad_status_and_server_prepare_action(self):
+        preparation = self.app.extensions['silrad_preparation']
+        self.app.config['SILRAD_DATA_DIR'] = str(self.root / 'unprepared-silrad')
+        self.assertEqual(self.client.get('/api/silrad/status').json['state'], 'idle')
+
+        def start_preparation():
+            preparation._state = 'preparing'
+            return True
+
+        with patch.object(preparation, 'start', side_effect=start_preparation):
+            response = self.client.post('/api/silrad/prepare')
+        self.assertEqual(response.status_code, 202)
+        self.assertTrue(response.json['ok'])
+        self.assertEqual(response.json['state'], 'preparing')
+
     def test_demo_endpoints_are_removed(self):
         self.assertEqual(self.client.post('/api/monitor/demo').status_code, 404)
         self.assertIn(self.client.post('/api/runs/local-transfer').status_code, (404, 405))

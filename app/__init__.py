@@ -10,6 +10,7 @@ from sqlalchemy.engine import Engine
 
 from .extensions import csrf, db, login_manager, migrate
 from .monitor import MonitoringService
+from .silrad_prepare import SilradPreparation
 
 DEV_SECRET = "dev-only-change-this-secret-key"
 
@@ -82,6 +83,7 @@ def create_app(test_config: Optional[dict] = None) -> Flask:
         SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "false").lower() == "true",
         MAX_CONTENT_LENGTH=5 * 1024 * 1024,
         RUNS_PATH=str(Path(app.instance_path) / "runs"),
+        SILRAD_DATA_DIR=os.environ.get("SILRAD_DATA_DIR", str(Path(app.instance_path) / "silrad")),
         # Fail closed: automatic quarantine is opt-in and requires validated
         # detection plus a deliberate deployment-level setting.
         AUTO_QUARANTINE=os.environ.get("AUTO_QUARANTINE", "false").lower() == "true",
@@ -141,6 +143,7 @@ def create_app(test_config: Optional[dict] = None) -> Flask:
         }
     _configure_sqlite(app)
     MonitoringService().init_app(app)
+    SilradPreparation().init_app(app)
 
     from .routes import main
     from .auth import auth

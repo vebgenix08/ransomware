@@ -61,18 +61,20 @@ def evaluate_agent_window(agent: str) -> bool:
     """Evaluate persisted agent events so separate cloud instances share state."""
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(seconds=30)
-    prefix = f"Agent {agent}: %"
+    agent_prefix = f"Agent {agent}: "
     events = (MonitoringEvent.query.filter(
         MonitoringEvent.source == "agent",
         MonitoringEvent.created_at >= cutoff,
-        MonitoringEvent.details.like(prefix),
     ).all())
     paths = {"created": set(), "modified": set(), "deleted": set()}
     for event in events:
+        if not event.details.startswith(agent_prefix):
+            continue
         operation = event.event_type.removeprefix("file_")
         if operation in paths:
-            prefix = f"Agent {agent}: {operation} "
-            paths[operation].add(event.details.removeprefix(prefix))
+            operation_prefix = f"{agent_prefix}{operation} "
+            if event.details.startswith(operation_prefix):
+                paths[operation].add(event.details.removeprefix(operation_prefix))
     created, modified, deleted = (paths[key] for key in ("created", "modified", "deleted"))
     total = len(created | modified | deleted)
     destructive = len(modified | deleted)
@@ -142,14 +144,12 @@ def run_mlran():
 def run_silrad():
     """Evaluate only the publisher's held-out SILRAD split for this run."""
     from .silrad import SOURCE
-    dataset_dir = Path(current_app.instance_path) / "silrad"
+    dataset_dir = Path(current_app.config["SILRAD_DATA_DIR"])
     model_path = dataset_dir / "metadata.json"
     test_path = dataset_dir / "fasttext-testmodel.csv"
-    if not model_path.is_file() or not test_path.is_file():
-        return jsonify(ok=False, message=(
-            "SILRAD is not prepared yet. In the project folder, run "
-            ".venv\\Scripts\\python.exe scripts\\setup_silrad.py"
-        )), 409
+    preparation = current_app.extensions["silrad_preparation"]
+    if not model_path.is_file() or not test_path.is_file() or not preparation.status().get("ready"):
+        return jsonify(ok=False, message="Prepare the SILRAD benchmark on this server first."), 409
     run = start_run(current_app, current_user.id, "silrad")
     with test_path.open("rb") as stream:
         run = execute(current_app, run, FileStorage(stream=stream, filename="fasttext-testmodel.csv"),
@@ -160,18 +160,20 @@ def run_silrad():
 @api.get("/silrad/status")
 @login_required
 def silrad_status():
-    metadata_path = Path(current_app.instance_path) / "silrad" / "metadata.json"
-    if not metadata_path.is_file():
-        return jsonify(ready=False, setup_command=".venv\\Scripts\\python.exe scripts\\setup_silrad.py")
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    evaluation = metadata.get("heldout_evaluation", {})
-    return jsonify(ready=True, model_name=metadata.get("display_name"),
-                   training_rows=metadata.get("training_rows"),
-                   test_rows=evaluation.get("windows"), threshold=evaluation.get("threshold"),
-                   metrics=evaluation.get("metrics", {}),
-                   confusion_matrix=evaluation.get("confusion_matrix", {}),
-                   class_counts=evaluation.get("class_counts", {}),
-                   limitations=metadata.get("limitations", []))
+    return jsonify(current_app.extensions["silrad_preparation"].status())
+
+
+@api.post("/silrad/prepare")
+@login_required
+def prepare_silrad():
+    preparation = current_app.extensions["silrad_preparation"]
+    started = preparation.start()
+    status = preparation.status()
+    if status.get("ready"):
+        return jsonify(ok=True, message="SILRAD benchmark is already prepared.", **status)
+    if not started:
+        return jsonify(ok=True, message="SILRAD benchmark preparation is already running.", **status), 202
+    return jsonify(ok=True, message="Preparing SILRAD data and model on this server.", **status), 202
 
 
 def get_monitor():

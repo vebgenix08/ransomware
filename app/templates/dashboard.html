@@ -77,21 +77,21 @@
             <p class="small muted">RansomShield trains on SILRAD’s training split and evaluates its separate held-out test split. It does not train or evaluate on the same rows.</p>
             <div class="d-flex flex-wrap align-items-center gap-3">
                 <button type="button" class="btn-brand" @click="performAction('/api/runs/silrad')" :disabled="busy || !silrad.ready">Run SILRAD held-out test</button>
-                <span class="small muted" x-show="!silrad.ready">First, prepare the local dataset once with the command below.</span>
+                <button type="button" class="btn-outline-custom" x-show="!silrad.ready && silrad.state !== 'preparing'" @click="prepareSilrad" :disabled="busy" x-text="silrad.state === 'failed' ? 'Retry server setup' : 'Prepare benchmark on server'"></button>
+                <span class="small muted" x-show="silrad.state === 'preparing'" role="status">Downloading SILRAD and training its benchmark model on the server. This can take a few minutes.</span>
             </div>
-            <div class="small mt-3" x-show="!silrad.ready">
-                <p class="mb-1">SILRAD data is not prepared on this computer yet. Run this in PowerShell from the project folder:</p>
-                <code x-text="silrad.setup_command || '.venv\\Scripts\\python.exe scripts\\setup_silrad.py'"></code>
+            <div class="small mt-3" x-show="silrad.state === 'failed'">
+                <p class="text-danger mb-0" x-text="silrad.error || 'Server setup failed. Check Render logs and retry.'"></p>
             </div>
             <div class="small mt-3" x-show="silrad.ready">
-                <p class="mb-1">Prepared locally · <span x-text="silrad.training_rows"></span> training events · <span x-text="silrad.test_rows"></span> held-out events · threshold <span x-text="silrad.threshold"></span></p>
+                <p class="mb-1">Prepared on server · <span x-text="silrad.training_rows"></span> training events · <span x-text="silrad.test_rows"></span> held-out events · threshold <span x-text="silrad.threshold"></span></p>
                 <p class="mb-0">Current held-out recall: <strong x-text="metric(silrad.metrics?.recall)"></strong> · false negatives: <strong x-text="silrad.confusion_matrix?.fn"></strong></p>
                 <p class="text-danger mt-2 mb-0" x-show="silrad.metrics?.recall < 0.5">This model misses many ransomware-labeled events. Use it for this dataset experiment only; it is not connected to live monitoring.</p>
             </div>
             <details class="small mt-3"><summary>First-time setup</summary>
-                <p class="muted mt-2 mb-1">Open PowerShell in the RansomShield project folder and run:</p>
-                <code>.venv\Scripts\python.exe scripts\setup_silrad.py</code>
-                <p class="muted mt-2 mb-0">This downloads about 4 MB and prepares local data and a model under <code>instance\silrad</code>. The data is not uploaded to Firebase or sent anywhere.</p>
+                <p class="muted mt-2 mb-1">Select <strong>Prepare benchmark on server</strong> to download the published SILRAD files from <a href="https://github.com/JamilIsp/SILRAD-dataset" target="_blank" rel="noopener">the source repository</a> and prepare them here. Raw event text is not stored in run reports.</p>
+                <p class="muted mb-1">For local setup, run <code>.venv\Scripts\python.exe scripts\setup_silrad.py</code> from the project folder.</p>
+                <p class="muted mt-2 mb-0">Render may clear local files during redeploys. Select server setup again if the benchmark is no longer ready. This is a dataset experiment, not live endpoint detection.</p>
             </details>
         </section>
 
@@ -268,7 +268,7 @@
             alerts: [],
             runs: [],
             quarantine: [],
-            silrad: {ready: false, setup_command: '.venv\\Scripts\\python.exe scripts\\setup_silrad.py'},
+            silrad: {ready: false, state: 'idle'},
             refreshTimer: null,
             status: {
                 running: false,
@@ -345,6 +345,7 @@
             startMonitor() { return this.performAction('{{ url_for("api.start_monitor") }}'); },
             metric(value) { return value == null ? 'undefined' : (value * 100).toFixed(2) + '%'; },
             stopMonitor() { return this.performAction('{{ url_for("api.stop_monitor") }}'); },
+            prepareSilrad() { return this.performAction('/api/silrad/prepare'); },
             async acknowledgeAlert(alertId) {
                 await this.performAction(`/api/alerts/${alertId}/acknowledge`);
             },

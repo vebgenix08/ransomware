@@ -8,9 +8,17 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 from uuid import uuid4
+from dotenv import load_dotenv
 
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
+
+
+ROOT = Path(__file__).resolve().parents[1]
+# Prefer the Render-specific file if present; keep credentials out of command
+# history and never print values. The VM can use environment variables instead.
+load_dotenv(ROOT / ".render.env", override=False, interpolate=False)
+load_dotenv(ROOT / ".env", override=False, interpolate=False)
 
 
 class AgentHandler(FileSystemEventHandler):
@@ -68,9 +76,9 @@ def main():
     parser.add_argument("--folder", required=True, type=Path, help="Folder to monitor on this endpoint")
     parser.add_argument("--name", default=os.environ.get("RANSOMSHIELD_AGENT_NAME", "windows-vm"))
     args = parser.parse_args()
-    token = os.environ.get("RANSOMSHIELD_AGENT_TOKEN", "")
+    token = os.environ.get("RANSOMSHIELD_AGENT_TOKEN") or os.environ.get("AGENT_API_TOKEN", "")
     if not token:
-        parser.error("Set RANSHIELD_AGENT_TOKEN in this terminal before starting the agent.")
+        parser.error("Set RANSOMSHIELD_AGENT_TOKEN or AGENT_API_TOKEN before starting the agent.")
     if not args.server.lower().startswith("https://"):
         parser.error("The endpoint requires HTTPS so the agent token is encrypted in transit.")
     root = args.folder.resolve()

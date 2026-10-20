@@ -58,6 +58,18 @@ class EndpointAgentApiTests(unittest.TestCase):
             alert = Alert.query.filter_by(model_version="endpoint-agent-burst-v1").one()
             self.assertIn("20 distinct file changes", alert.details)
 
+    def test_agent_names_with_underscores_do_not_mix_other_agents_events(self):
+        headers = {"Authorization": "Bearer test-agent-secret"}
+        for index in range(19):
+            payload = {"event_id": str(uuid4()), "agent": "winXvm", "operation": "modified",
+                       "path": f"safe/file-{index}.txt"}
+            self.client.post("/api/agent/events", json=payload, headers=headers)
+        payload = {"event_id": str(uuid4()), "agent": "win_vm", "operation": "modified",
+                   "path": "safe/own-file.txt"}
+        response = self.client.post("/api/agent/events", json=payload, headers=headers)
+        self.assertEqual(response.status_code, 202)
+        self.assertFalse(response.json["alert_created"])
+
 
 if __name__ == "__main__":
     unittest.main()
