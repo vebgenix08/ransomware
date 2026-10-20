@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 venv/
 .env
+.render.env
 .flaskenv
 instance/
 .playwright-cli/
