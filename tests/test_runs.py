@@ -215,6 +215,20 @@ class RunTests(unittest.TestCase):
         self.assertTrue(response.json['ok'])
         self.assertEqual(response.json['state'], 'preparing')
 
+    def test_incomplete_silrad_metadata_is_not_reported_ready(self):
+        import json
+        data_dir = self.root / 'partial-silrad'
+        data_dir.mkdir()
+        for filename in ('fasttext-testmodel.csv', 'fasttext-trainmodel.csv', 'model.ubj'):
+            (data_dir / filename).write_text('partial', encoding='utf-8')
+        (data_dir / 'metadata.json').write_text(json.dumps({
+            'booster': 'model.ubj', 'display_name': 'SILRAD', 'training_rows': 39999,
+        }), encoding='utf-8')
+        self.app.config['SILRAD_DATA_DIR'] = str(data_dir)
+        status = self.client.get('/api/silrad/status').json
+        self.assertFalse(status['ready'])
+        self.assertEqual(status['state'], 'idle')
+
     def test_demo_endpoints_are_removed(self):
         self.assertEqual(self.client.post('/api/monitor/demo').status_code, 404)
         self.assertIn(self.client.post('/api/runs/local-transfer').status_code, (404, 405))

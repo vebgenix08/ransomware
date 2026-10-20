@@ -34,6 +34,17 @@ class SilradPreparation:
                 if not booster_name or Path(booster_name).name != booster_name or not (self.directory / booster_name).is_file():
                     raise ValueError("SILRAD model artifact is missing or invalid.")
                 evaluation = metadata.get("heldout_evaluation", {})
+                metrics = evaluation.get("metrics")
+                confusion_matrix = evaluation.get("confusion_matrix")
+                if (
+                    not isinstance(evaluation.get("windows"), int)
+                    or evaluation["windows"] <= 0
+                    or not isinstance(metrics, dict)
+                    or not isinstance(metrics.get("recall"), (int, float))
+                    or not isinstance(confusion_matrix, dict)
+                    or not isinstance(confusion_matrix.get("fn"), int)
+                ):
+                    raise ValueError("SILRAD held-out evaluation is incomplete.")
                 return {
                     "ready": True,
                     "state": "ready",
@@ -41,8 +52,8 @@ class SilradPreparation:
                     "training_rows": metadata.get("training_rows"),
                     "test_rows": evaluation.get("windows"),
                     "threshold": evaluation.get("threshold"),
-                    "metrics": evaluation.get("metrics", {}),
-                    "confusion_matrix": evaluation.get("confusion_matrix", {}),
+                    "metrics": metrics,
+                    "confusion_matrix": confusion_matrix,
                     "class_counts": evaluation.get("class_counts", {}),
                     "limitations": metadata.get("limitations", []),
                 }
