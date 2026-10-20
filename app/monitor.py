@@ -116,6 +116,7 @@ class MonitoringService:
         self._snapshot: Dict[str, FileState] = {}
         self._queue: Queue = Queue(maxsize=QUEUE_LIMIT)
         self._collector = _WatchCollector(self)
+        self._owner_id: Optional[int] = None
         self._activity_window = deque()
         self._last_burst_alert_at = 0.0
         self._metrics = {
@@ -144,11 +145,16 @@ class MonitoringService:
     def is_running(self) -> bool:
         return bool(self._thread and self._thread.is_alive())
 
-    def start(self) -> bool:
+    def owned_by(self, user_id: int) -> bool:
+        with self._lock:
+            return self._owner_id == user_id
+
+    def start(self, owner_id: Optional[int] = None) -> bool:
         with self._lock:
             if self.is_running:
                 return False
 
+            self._owner_id = owner_id
             self._snapshot = take_snapshot(self.target_path)
             self._activity_window.clear()
             self._last_burst_alert_at = 0.0
@@ -169,9 +175,9 @@ class MonitoringService:
             self._thread.start()
             return True
 
-    def stop(self) -> bool:
+    def stop(self, owner_id: Optional[int] = None) -> bool:
         with self._lock:
-            if not self.is_running:
+            if not self.is_running or (owner_id is not None and self._owner_id != owner_id):
                 return False
             self._stop_event.set()
             thread = self._thread
@@ -366,6 +372,7 @@ class MonitoringService:
         with self.app.app_context():
             db.session.add(
                 MonitoringEvent(
+                    user_id=self._owner_id,
                     event_type=event_type,
                     severity=severity,
                     details=details,
@@ -384,11 +391,13 @@ class MonitoringService:
         risk_score: int,
         affected=None,
         model_version: str = "rolling-file-burst-v1",
+        owner_id: Optional[int] = None,
     ) -> None:
         if not self.app:
             return
         with self.app.app_context():
             alert = Alert(
+                    user_id=self._owner_id if owner_id is None else owner_id,
                     title=title,
                     details=details,
                     severity=severity,

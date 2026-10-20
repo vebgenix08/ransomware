@@ -9,7 +9,7 @@ from flask import g
 from app import create_app
 from app.detector import FEATURE_NAMES
 from app.extensions import db
-from app.models import AnalysisRun, User
+from app.models import Alert, AnalysisRun, MonitoringEvent, QuarantineItem, User
 
 
 class RunTests(unittest.TestCase):
@@ -24,12 +24,12 @@ class RunTests(unittest.TestCase):
         self.context = self.app.app_context()
         self.context.push()
         self.addCleanup(self.context.pop)
-        user = User(full_name="Tester", email="runs@example.invalid", password_hash="unused")
-        db.session.add(user)
+        self.user = User(full_name="Tester", email="runs@example.invalid", password_hash="unused")
+        db.session.add(self.user)
         db.session.commit()
         self.client = self.app.test_client()
         with self.client.session_transaction() as session:
-            session['_user_id'] = str(user.id)
+            session['_user_id'] = str(self.user.id)
             session['_fresh'] = True
 
     def upload(self, payload):
@@ -111,6 +111,61 @@ class RunTests(unittest.TestCase):
             self.assertEqual(self.client.get(url).status_code, 404)
         g.pop('_login_user', None)
         self.assertEqual(self.app.test_client().get('/api/runs').status_code, 302)
+
+    def test_live_events_alerts_quarantine_and_monitor_controls_are_account_scoped(self):
+        other = User(full_name='Other', email='other-live@example.invalid', password_hash='unused')
+        db.session.add(other)
+        db.session.flush()
+        own_event = MonitoringEvent(user_id=self.user.id, event_type='file_created', severity='info', details='own path', risk_score=0)
+        other_event = MonitoringEvent(user_id=other.id, event_type='file_created', severity='info', details='private path', risk_score=0)
+        own_alert = Alert(user_id=self.user.id, title='Own live alert', details='own', severity='medium', risk_score=60)
+        other_alert = Alert(user_id=other.id, title='Private live alert', details='private', severity='medium', risk_score=60)
+        db.session.add_all([own_event, other_event, own_alert, other_alert])
+        db.session.flush()
+        own_item = QuarantineItem(alert_id=own_alert.id, original_path='own.txt', quarantine_path=str(self.root / 'q' / 'own.txt'), sha256='a' * 64)
+        other_item = QuarantineItem(alert_id=other_alert.id, original_path='private.txt', quarantine_path=str(self.root / 'q' / 'private.txt'), sha256='b' * 64)
+        db.session.add_all([own_item, other_item])
+        db.session.commit()
+
+        with self.client.session_transaction() as session:
+            session['_user_id'] = str(other.id)
+        g.pop('_login_user', None)
+        self.assertEqual([event['details'] for event in self.client.get('/api/events').json['events']], ['private path'])
+        self.assertEqual([alert['title'] for alert in self.client.get('/api/alerts').json['alerts']], ['Private live alert'])
+        self.assertEqual([item['original_path'] for item in self.client.get('/api/quarantine').json['items']], ['private.txt'])
+        self.assertEqual(self.client.post(f'/api/alerts/{own_alert.id}/acknowledge').status_code, 404)
+        self.assertEqual(self.client.post(f'/api/quarantine/{own_item.id}/restore').status_code, 404)
+
+        class ActiveMonitor:
+            is_running = True
+
+            def owned_by(self, user_id):
+                return user_id == self.owner_id
+
+            def __init__(self, owner_id):
+                self.owner_id = owner_id
+
+            def status(self):
+                return {"running": True, "connection_state": "Connected", "model_state": "Rolling burst rules",
+                        "target": "private/server/path", "interval_seconds": 2, "reconcile_seconds": 30,
+                        "auto_quarantine": False, "cpu_percent": 17, "memory_percent": 20,
+                        "process_count": 4, "last_check": None, "last_successful_scan": None,
+                        "last_risk_score": 60, "monitored_files": 9, "dropped_events": 0,
+                        "queue_depth": 0, "collector": "poll", "last_activity": {}}
+
+            def start(self, owner_id=None):
+                raise AssertionError('another account must not start the active monitor')
+
+            def stop(self, owner_id=None):
+                raise AssertionError('another account must not stop the active monitor')
+
+        with patch('app.api.get_monitor', return_value=ActiveMonitor(self.user.id)):
+            status = self.client.get('/api/monitor/status').json
+            self.assertEqual(status['event_count'], 1)
+            self.assertEqual(status['status']['target'], 'Not assigned to this account')
+            self.assertEqual(status['status']['cpu_percent'], 0)
+            self.assertEqual(self.client.post('/api/monitor/start').status_code, 409)
+            self.assertEqual(self.client.post('/api/monitor/stop').status_code, 403)
 
     def test_model_unavailable_records_failure(self):
         with patch('app.runs.evaluate', side_effect=ValueError('Model unavailable')):

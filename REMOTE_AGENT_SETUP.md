@@ -1,11 +1,11 @@
 # Monitor a Windows VM
 
-The endpoint agent reports relative file names and create, modify, and delete events. It never sends file contents. Its events are stored in PostgreSQL and evaluated against the 30-second burst rules. The dashboard monitor does not need to be running for remote agent events.
+The endpoint agent reports relative file names and create, modify, and delete events. It never sends file contents. Its events are stored in PostgreSQL and evaluated against the 30-second burst rules. The dashboard monitor does not need to be running for remote agent events. Agent events and alerts are assigned to the configured `AGENT_OWNER_EMAIL` account.
 
 ## Setup
 
 1. Host RansomShield at an HTTPS address using a reverse proxy such as Caddy or Nginx. Waitress stays on loopback by default; set `APP_HOST=0.0.0.0` only for a controlled LAN lab, then set up HTTPS before using the agent. The agent deliberately refuses plain HTTP because its token would otherwise travel unencrypted.
-2. Set `AGENT_API_TOKEN` in the host `.env` or Render Environment settings. Use a long random value and never commit or share it. If your local `.render.env` is the same file you uploaded to Render, the host-side agent script reads it automatically when run from this project folder. Otherwise, set `RANSOMSHIELD_AGENT_TOKEN` in PowerShell to the exact Render token.
+2. Set `AGENT_API_TOKEN` in the host `.env` or Render Environment settings. Use a long random value and never commit or share it. Set `AGENT_OWNER_EMAIL` to the email of the verified RansomShield account that owns this endpoint's events. The account must already exist. Events are rejected until the owner email is configured. If your local `.render.env` is the same file you uploaded to Render, the host-side agent script reads the token automatically when run from this project folder. Otherwise, set `RANSOMSHIELD_AGENT_TOKEN` in PowerShell to the exact Render token.
 
    If you create a new token, update it in both Render and the endpoint environment. Do not commit `.env` or send the token in chat.
 3. On the VM, install Python 3.10 or newer. Copy the project folder (or just its `scripts` folder and requirements) to the VM, then install the project requirements:

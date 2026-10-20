@@ -197,10 +197,13 @@ class ResponseTests(unittest.TestCase):
         self.assertEqual(list(self.monitor.target_path.iterdir()), [])
 
     def test_authenticated_alert_response_and_dashboard(self):
-        respond(self.app, self.alert(), self.monitor.target_path, set())
         user = User(full_name="Tester", email="tester@example.invalid", password_hash="unused")
         db.session.add(user)
         db.session.commit()
+        alert = self.alert()
+        alert.user_id = user.id
+        db.session.commit()
+        respond(self.app, alert, self.monitor.target_path, set())
         client = self.app.test_client()
         with client.session_transaction() as session:
             session["_user_id"] = str(user.id)

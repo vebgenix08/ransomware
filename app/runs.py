@@ -62,7 +62,7 @@ def execute(app, run, upload, dataset_name="Uploaded telemetry", source="User-pr
                                                  for name in ("created_count", "modified_count", "deleted_count", "decoy_files_touched")}
         report["quarantine_scope"] = "No files were moved from a dataset evaluation. CSV path fields are never acted on."
         if suspicious_count:
-            alert = Alert(title=f"{run.kind.replace('_', ' ').title()} run flagged samples", severity="high" if report["risk_score"] >= 85 else "medium",
+            alert = Alert(user_id=run.user_id, title=f"{run.kind.replace('_', ' ').title()} run flagged samples", severity="high" if report["risk_score"] >= 85 else "medium",
                           risk_score=report["risk_score"], model_version=model_label,
                           rule_trace=[{"signal": "model_probability", "value": report["risk_score"]},
                                       {"signal": "suspicious_windows", "value": suspicious_count},

@@ -105,6 +105,7 @@ def create_app(test_config: Optional[dict] = None) -> Flask:
         FIREBASE_MESSAGING_SENDER_ID=os.environ.get("FIREBASE_MESSAGING_SENDER_ID", "").strip(),
         FIREBASE_APP_ID=os.environ.get("FIREBASE_APP_ID", "").strip(),
         AGENT_API_TOKEN=os.environ.get("AGENT_API_TOKEN", "").strip(),
+        AGENT_OWNER_EMAIL=os.environ.get("AGENT_OWNER_EMAIL", "").strip().lower(),
     )
 
     if test_config:

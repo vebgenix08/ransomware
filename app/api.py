@@ -8,10 +8,11 @@ from uuid import UUID
 from pathlib import Path
 from flask import Blueprint, current_app, jsonify, request, Response, abort, send_file
 from flask_login import login_required, current_user
+from sqlalchemy import or_
 from werkzeug.datastructures import FileStorage
 
 from .extensions import csrf, db
-from .models import Alert, MonitoringEvent, AnalysisRun, QuarantineItem
+from .models import Alert, MonitoringEvent, AnalysisRun, QuarantineItem, User
 from .runs import start_run, execute
 
 
@@ -27,6 +28,10 @@ def agent_event():
     supplied = supplied.removeprefix("Bearer ")
     if not token or not hmac.compare_digest(supplied, token):
         return jsonify(ok=False, message="Agent authentication failed."), 401
+    owner_email = current_app.config.get("AGENT_OWNER_EMAIL", "").strip().lower()
+    owner = User.query.filter_by(email=owner_email).first() if owner_email else None
+    if owner is None:
+        return jsonify(ok=False, message="Endpoint agent owner is not configured."), 503
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
         return jsonify(ok=False, message="Expected a JSON event."), 400
@@ -49,21 +54,23 @@ def agent_event():
     if existing:
         return jsonify(ok=True, duplicate=True), 202
     db.session.add(MonitoringEvent(
+        user_id=owner.id,
         event_id=event_id, event_type=f"file_{operation}", severity="info",
         details=f"Agent {agent}: {operation} {relative_path}"[:500], risk_score=0, source="agent",
     ))
     db.session.commit()
-    burst_alert = evaluate_agent_window(agent)
+    burst_alert = evaluate_agent_window(agent, owner.id)
     return jsonify(ok=True, duplicate=False, evaluated=True, alert_created=burst_alert), 202
 
 
-def evaluate_agent_window(agent: str) -> bool:
+def evaluate_agent_window(agent: str, user_id: int) -> bool:
     """Evaluate persisted agent events so separate cloud instances share state."""
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(seconds=30)
     agent_prefix = f"Agent {agent}: "
     events = (MonitoringEvent.query.filter(
         MonitoringEvent.source == "agent",
+        MonitoringEvent.user_id == user_id,
         MonitoringEvent.created_at >= cutoff,
     ).all())
     paths = {"created": set(), "modified": set(), "deleted": set()}
@@ -82,7 +89,7 @@ def evaluate_agent_window(agent: str) -> bool:
              or (total >= 30 and destructive >= 10))
     if not burst:
         return False
-    last_alert = Alert.query.filter_by(model_version="endpoint-agent-burst-v1").filter(
+    last_alert = Alert.query.filter_by(user_id=user_id, model_version="endpoint-agent-burst-v1").filter(
         Alert.created_at >= now - timedelta(seconds=60)
     ).first()
     if last_alert:
@@ -98,6 +105,7 @@ def evaluate_agent_window(agent: str) -> bool:
          "Review this activity; this rule is an anomaly signal, not a malware verdict."),
         "high" if severe else "medium", max(risk, 60), created | modified | deleted,
         model_version="endpoint-agent-burst-v1",
+        owner_id=user_id,
     )
     return True
 
@@ -188,10 +196,20 @@ def monitor_status():
     telemetry_model_path = Path(current_app.root_path) / "artifacts/behavioral_model.json"
     public_model = json.loads(public_model_path.read_text(encoding="utf-8")) if public_model_path.exists() else {}
     telemetry_model = json.loads(telemetry_model_path.read_text(encoding="utf-8")) if telemetry_model_path.exists() else {}
+    status = monitor.status()
+    if not monitor.owned_by(current_user.id):
+        status = {
+            "running": False, "connection_state": "Unavailable", "model_state": "Rolling burst rules",
+            "target": "Not assigned to this account", "interval_seconds": status["interval_seconds"],
+            "reconcile_seconds": status["reconcile_seconds"], "auto_quarantine": False,
+            "cpu_percent": 0, "memory_percent": 0, "process_count": 0, "last_check": None,
+            "last_successful_scan": None, "last_risk_score": 0, "monitored_files": 0,
+            "dropped_events": 0, "queue_depth": 0, "collector": "poll", "last_activity": {},
+        }
     return jsonify(
         {
-            "status": monitor.status(),
-            "event_count": MonitoringEvent.query.count(),
+            "status": status,
+            "event_count": MonitoringEvent.query.filter_by(user_id=current_user.id).count(),
             "alert_count": visible_alerts().filter_by(acknowledged=False).count(),
             "model": {key: telemetry_model.get(key) for key in
                       ("display_name", "trained_at", "training", "metrics", "decision_threshold")},
@@ -216,7 +234,11 @@ def monitor_status():
 @login_required
 def start_monitor():
     monitor = get_monitor()
-    started = monitor.start()
+    if monitor.is_running and not monitor.owned_by(current_user.id):
+        return jsonify(ok=False, message="The shared monitor is in use by another account. Stop it from that account before starting yours."), 409
+    started = monitor.start(owner_id=current_user.id)
+    if not monitor.owned_by(current_user.id):
+        return jsonify(ok=False, message="The monitor was claimed by another account. Refresh and try again."), 409
     return jsonify(
         {
             "ok": True,
@@ -230,7 +252,9 @@ def start_monitor():
 @login_required
 def stop_monitor():
     monitor = get_monitor()
-    stopped = monitor.stop()
+    if monitor.is_running and not monitor.owned_by(current_user.id):
+        return jsonify(ok=False, message="Only the account that started monitoring can stop it."), 403
+    stopped = monitor.stop(owner_id=current_user.id)
     return jsonify(
         {
             "ok": True,
@@ -332,6 +356,7 @@ def run_predictions(run_id):
 @login_required
 def incident_report(alert_id):
     alert = db.get_or_404(Alert, alert_id)
+    check_alert_owner(alert_id)
     run = AnalysisRun.query.filter_by(alert_id=alert_id).first()
     if run:
         return run_report(run.id)
@@ -343,8 +368,11 @@ def incident_report(alert_id):
 @api.get("/quarantine")
 @login_required
 def list_quarantine():
-    hidden = db.select(AnalysisRun.alert_id).where(AnalysisRun.user_id != current_user.id, AnalysisRun.alert_id.isnot(None))
-    items = (QuarantineItem.query.filter(QuarantineItem.alert_id.notin_(hidden))
+    owned_run_alerts = db.select(AnalysisRun.alert_id).where(
+        AnalysisRun.user_id == current_user.id, AnalysisRun.alert_id.isnot(None))
+    owned_live_alerts = db.select(Alert.id).where(Alert.user_id == current_user.id)
+    items = (QuarantineItem.query.filter(or_(QuarantineItem.alert_id.in_(owned_live_alerts),
+                                            QuarantineItem.alert_id.in_(owned_run_alerts)))
              .order_by(QuarantineItem.quarantined_at.desc()).limit(100).all())
     return jsonify(items=[item.to_dict() for item in items])
 
@@ -380,7 +408,8 @@ def notification_configuration():
 @login_required
 def list_events():
     limit = min(max(request.args.get("limit", 10, type=int), 1), 50)
-    events = MonitoringEvent.query.order_by(MonitoringEvent.created_at.desc()).limit(limit).all()
+    events = (MonitoringEvent.query.filter_by(user_id=current_user.id)
+              .order_by(MonitoringEvent.created_at.desc()).limit(limit).all())
     return jsonify({"events": [event.to_dict() for event in events]})
 
 
@@ -403,11 +432,13 @@ def acknowledge_alert(alert_id: int):
 
 
 def visible_alerts():
-    hidden = db.select(AnalysisRun.alert_id).where(AnalysisRun.user_id != current_user.id, AnalysisRun.alert_id.isnot(None))
-    return Alert.query.filter(Alert.id.notin_(hidden))
+    owned_run_alerts = db.select(AnalysisRun.alert_id).where(
+        AnalysisRun.user_id == current_user.id, AnalysisRun.alert_id.isnot(None))
+    return Alert.query.filter(or_(Alert.user_id == current_user.id, Alert.id.in_(owned_run_alerts)))
 
 
 def check_alert_owner(alert_id):
+    alert = db.session.get(Alert, alert_id)
     run = AnalysisRun.query.filter_by(alert_id=alert_id).first()
-    if run and run.user_id != current_user.id:
+    if not alert or (alert.user_id != current_user.id and (not run or run.user_id != current_user.id)):
         abort(404)

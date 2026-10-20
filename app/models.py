@@ -37,6 +37,7 @@ class MonitoringEvent(db.Model):
     __tablename__ = "monitoring_events"
 
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True, index=True)
     event_id = db.Column(db.String(36), nullable=True, unique=True)
     event_type = db.Column(db.String(50), nullable=False, index=True)
     severity = db.Column(db.String(20), nullable=False, default="info")
@@ -67,6 +68,7 @@ class Alert(db.Model):
     __tablename__ = "alerts"
 
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True, index=True)
     title = db.Column(db.String(150), nullable=False)
     details = db.Column(db.String(500), nullable=False)
     severity = db.Column(db.String(20), nullable=False, default="medium")
