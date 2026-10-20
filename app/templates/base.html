@@ -4,6 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#151713">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="RansomShield">
+    <link rel="manifest" href="{{ url_for('main.manifest') }}">
+    <link rel="icon" href="{{ url_for('static', filename='icons/icon.svg') }}" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="description" content="{% block description %}RansomShield behavioral threat detection research project.{% endblock %}">
     <title>{% block title %}RansomShield{% endblock %}</title>
@@ -211,6 +218,7 @@
 </head>
 
 <body x-data="siteShell()">
+    <button id="install-app" class="btn-brand position-fixed bottom-0 end-0 m-3 d-none" style="z-index:1050" type="button">Install RansomShield</button>
     <nav class="site-nav fixed-top" aria-label="Primary navigation">
         <div class="container py-3">
             <div class="d-flex align-items-center justify-content-between">
@@ -225,7 +233,6 @@
                     <a class="nav-item-link" href="{{ url_for('main.index') }}#team">Our team</a>
                     {% if current_user.is_authenticated %}
                         <a class="nav-item-link" href="{{ url_for('main.dashboard') }}">Dashboard</a>
-                        <a class="nav-item-link" href="{{ url_for('downloads.index') }}">Downloads</a>
                         <form method="post" action="{{ url_for('auth.logout') }}">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button class="btn-outline-custom py-2" type="submit">Sign out</button>
@@ -256,7 +263,6 @@
                     <a class="nav-item-link" @click="mobileOpen = false" href="{{ url_for('main.index') }}#team">Our team</a>
                     {% if current_user.is_authenticated %}
                         <a class="nav-item-link" href="{{ url_for('main.dashboard') }}">Dashboard</a>
-                        <a class="nav-item-link" @click="mobileOpen = false" href="{{ url_for('downloads.index') }}">Downloads</a>
                         <form method="post" action="{{ url_for('auth.logout') }}">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button class="btn-outline-custom w-100" type="submit">Sign out</button>
@@ -294,7 +300,7 @@
                         <span class="brand-mark"><i class="bi bi-shield-check"></i></span>
                         <span class="brand-name">Ransom<span>Shield</span></span>
                     </a>
-                    <p class="muted mt-3 mb-0" style="max-width:500px">A behavioral ransomware detection and alerting research project developed at Bapuji Institute of Engineering and Technology.</p>
+                    <p class="muted mt-3 mb-0" style="max-width:500px">A file activity monitoring and alerting research prototype developed at Bapuji Institute of Engineering and Technology.</p>
                 </div>
                 <div class="col-6 col-lg-3">
                     <strong class="d-block mb-3">Explore</strong>
@@ -309,7 +315,6 @@
                     <div class="d-grid gap-2 small">
                         {% if current_user.is_authenticated %}
                             <a class="footer-link" href="{{ url_for('main.dashboard') }}">Dashboard</a>
-                            <a class="footer-link" href="{{ url_for('downloads.index') }}">Downloads</a>
                         {% else %}
                             <a class="footer-link" href="{{ url_for('auth.signin') }}">Sign in</a>
                             <a class="footer-link" href="{{ url_for('auth.signup') }}">Create account</a>
@@ -326,6 +331,26 @@
 
     <script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>
     <script>
+        (() => {
+            let installPrompt;
+            const installButton = document.getElementById('install-app');
+            window.addEventListener('beforeinstallprompt', (event) => {
+                event.preventDefault();
+                installPrompt = event;
+                installButton?.classList.remove('d-none');
+            });
+            installButton?.addEventListener('click', async () => {
+                if (!installPrompt) return;
+                installPrompt.prompt();
+                await installPrompt.userChoice;
+                installPrompt = null;
+                installButton.classList.add('d-none');
+            });
+            window.addEventListener('appinstalled', () => installButton?.classList.add('d-none'));
+            if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+                window.addEventListener('load', () => navigator.serviceWorker.register('{{ url_for("main.service_worker") }}').catch(() => {}));
+            }
+        })();
         function siteShell() {
             return {
                 mobileOpen: false,
@@ -341,6 +366,10 @@
             };
         }
     </script>
+    {% if AUTH_PROVIDER == 'firebase' %}
+    <script id="firebase-web-config" type="application/json">{{ FIREBASE_WEB_CONFIG|tojson }}</script>
+    <script type="module" src="{{ url_for('static', filename='firebase-auth.js') }}?v=2"></script>
+    {% endif %}
     {% block scripts %}{% endblock %}
 </body>
 </html>

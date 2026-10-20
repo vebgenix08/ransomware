@@ -25,6 +25,56 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _format_alert_email(alert, result, app_name: str) -> tuple[str, str]:
+    """Build a readable email and explain whether the alert is dataset or live."""
+    trace = {item.get("signal"): item.get("value") for item in (alert.rule_trace or [])}
+    model_version = alert.model_version or ""
+    files_moved = sum(item.get("status") == "quarantined" for item in result.get("files", []))
+    lines = ["RansomShield notification", f"Application: {app_name}", "", alert.title, "", f"Severity: {alert.severity.title()}"]
+
+    if "suspicious_windows" in trace:
+        count = trace.get("suspicious_windows", "unknown")
+        total = trace.get("total_samples", "unknown")
+        dataset = trace.get("dataset_name")
+        source = trace.get("dataset_source")
+        lines.extend([
+            "Analysis type: Offline CSV dataset evaluation",
+            f"Records flagged by the model: {count} of {total}",
+            f"Dataset: {dataset}" if dataset else f"Model: {model_version}",
+            f"Source: {source}" if source else None,
+            f"Highest per-record model score: {alert.risk_score}/100",
+            "This result describes rows in the evaluated CSV. It does not mean a monitored computer is infected.",
+        ])
+        if alert.details:
+            lines.append(f"Run details: {alert.details}")
+    elif model_version.startswith("rolling-file-burst"):
+        lines.extend([
+            "Analysis type: Live monitored-folder activity",
+            "A rolling file-change rule crossed its review threshold.",
+            f"Activity score: {alert.risk_score}/100 (heuristic, not a probability)",
+            alert.details,
+            "This is an activity anomaly for review, not confirmation of malware.",
+        ])
+    else:
+        lines.extend([f"Details: {alert.details}", f"Model or rule: {model_version or 'Not specified'}"])
+
+    lines.extend([
+        f"Alert ID: {alert.id}",
+        f"Files moved to quarantine: {files_moved}",
+        "Review this alert and its CSV report in the RansomShield dashboard.",
+    ])
+    if not files_moved:
+        lines.append("No files were moved to quarantine.")
+
+    if "suspicious_windows" in trace:
+        subject = f"{app_name}: dataset analysis flagged records (alert #{alert.id})"
+    elif model_version.startswith("rolling-file-burst"):
+        subject = f"{app_name}: file activity burst for review (alert #{alert.id})"
+    else:
+        subject = f"{app_name}: activity alert for review (alert #{alert.id})"
+    return subject, "\n".join(line for line in lines if line)
+
+
 def respond(app, alert, root, affected, quarantine_allowed=True):
     existing = ResponseAction.query.filter_by(alert_id=alert.id).first()
     if existing:
@@ -124,10 +174,12 @@ def respond(app, alert, root, affected, quarantine_allowed=True):
                         raise ValueError("Webhook rejected notification")
             else:
                 message = EmailMessage()
-                message["Subject"] = f"RansomShield suspicious activity alert #{alert.id}"
+                app_name = config.get("APP_NAME", "RansomShield")
+                subject, body = _format_alert_email(alert, result, app_name)
+                message["Subject"] = subject
                 message["From"] = config["RESPONSE_EMAIL_FROM"]
                 message["To"] = config["RESPONSE_EMAIL_TO"]
-                message.set_content(json.dumps(payload, indent=2))
+                message.set_content(body)
                 if not config["SMTP_HOST"] or not config["RESPONSE_EMAIL_FROM"]:
                     raise ValueError("SMTP host and sender are required")
                 security = config.get("SMTP_SECURITY", "starttls")

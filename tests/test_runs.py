@@ -19,7 +19,8 @@ class RunTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.app = create_app(dict(TESTING=True, WTF_CSRF_ENABLED=False, SQLALCHEMY_DATABASE_URI="sqlite://",
                                    MONITOR_TARGET_PATH=self.root/'decoy', QUARANTINE_PATH=self.root/'quarantine',
-                                   RUNS_PATH=self.root/'runs', RESPONSE_WEBHOOK_URL="", RESPONSE_EMAIL_TO=""))
+                                   RUNS_PATH=self.root/'runs', RESPONSE_WEBHOOK_URL="", RESPONSE_EMAIL_TO="",
+                                   AUTO_QUARANTINE=True))
         self.context = self.app.app_context()
         self.context.push()
         self.addCleanup(self.context.pop)
@@ -47,16 +48,16 @@ class RunTests(unittest.TestCase):
             writer.writerow(dict(trace_id='fixture', window_index=i, label=int(suspicious), **values))
         return stream.getvalue().encode()
 
-    def test_real_simulation_unique_ids_quarantine_and_reports(self):
-        first = self.client.post('/api/monitor/demo')
+    def test_suspicious_dataset_runs_record_alerts_without_moving_local_files(self):
+        first = self.upload(self.fixture(True))
         self.assertEqual(first.status_code, 200, first.json)
         run = first.json['run']
         self.assertEqual(run['result']['model_prediction'], 'suspicious')
         self.assertEqual(run['status'], 'completed')
         files = run['incident']['response']['files']
-        self.assertEqual(sum(f['status'] == 'quarantined' for f in files), 27)
-        self.assertEqual(sum(f['status'] == 'failed' for f in files), 0)
-        second = self.client.post('/api/monitor/demo').json['run']
+        self.assertEqual(files, [])
+        self.assertEqual(run['incident']['response']['quarantine'], 'no_files')
+        second = self.upload(self.fixture(True)).json['run']
         self.assertNotEqual(run['id'], second['id'])
         self.assertEqual(len(self.client.get('/api/runs').json['runs']), 2)
         report = self.client.get(f"/api/alerts/{run['incident']['id']}/report.csv")
@@ -71,8 +72,8 @@ class RunTests(unittest.TestCase):
         suspicious = self.upload(self.fixture(True)).json['run']
         self.assertEqual(suspicious['result']['model_prediction'], 'suspicious')
         self.assertEqual(suspicious['result']['metrics']['recall'], 1)
-        self.assertEqual(len(suspicious['incident']['response']['files']), 8)
-        self.assertTrue(all(f['status'] == 'quarantined' for f in suspicious['incident']['response']['files']))
+        self.assertEqual(suspicious['incident']['response']['files'], [])
+        self.assertEqual(suspicious['result']['quarantine_scope'], 'No files were moved from a dataset evaluation. CSV path fields are never acted on.')
 
     def test_invalid_dataset_persists_failed_run_and_creates_no_incident(self):
         result = self.upload(b'wrong,column\n1,2\n')
@@ -87,16 +88,16 @@ class RunTests(unittest.TestCase):
         self.assertEqual(result.status_code, 422)
         self.assertIn('Missing columns', result.json['message'])
 
-    def test_failed_notifications_do_not_undo_containment(self):
+    def test_failed_notifications_do_not_undo_incident_record(self):
         self.app.config['RESPONSE_WEBHOOK_URL'] = 'https://example.invalid'
         with patch('app.response.urlopen', side_effect=OSError('offline')):
-            run = self.client.post('/api/monitor/demo').json['run']
+            run = self.upload(self.fixture(True)).json['run']
         self.assertEqual(run['status'], 'completed')
         self.assertEqual(run['incident']['response']['notifications']['webhook'], 'failed')
-        self.assertTrue(any(f['status'] == 'quarantined' for f in run['incident']['response']['files']))
+        self.assertEqual(run['incident']['response']['files'], [])
 
     def test_run_access_is_owned_and_anonymous_is_denied(self):
-        run = self.client.post('/api/monitor/demo').json['run']
+        run = self.upload(self.fixture(True)).json['run']
         other = User(full_name='Other', email='other@example.invalid', password_hash='unused')
         db.session.add(other)
         db.session.commit()
@@ -113,22 +114,35 @@ class RunTests(unittest.TestCase):
 
     def test_model_unavailable_records_failure(self):
         with patch('app.runs.evaluate', side_effect=ValueError('Model unavailable')):
-            response = self.client.post('/api/monitor/demo')
+            response = self.upload(self.fixture(True))
         self.assertEqual(response.status_code, 422)
         self.assertEqual(AnalysisRun.query.one().status, 'failed')
 
     def test_dashboard_renders_and_settings_do_not_expose_secrets(self):
         self.app.config['SMTP_PASSWORD'] = 'never-expose-me'
-        self.assertEqual(self.client.get('/dashboard').status_code, 200)
+        dashboard = self.client.get('/dashboard')
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertIn('Start here: test and use RansomShield', dashboard.text)
+        self.assertIn('SILRAD Sysmon benchmark', dashboard.text)
+        self.assertNotIn('Published MLRan evaluation', dashboard.text)
         self.assertNotIn('never-expose-me', self.client.get('/api/notifications').text)
-        self.assertIn('Run history', self.client.get('/dashboard').text)
+        self.assertIn('Run history', dashboard.text)
 
-    def test_upload_limits_and_sample_download(self):
+    def test_upload_limits_and_published_dataset_download(self):
         self.assertEqual(self.upload(b'x' * (5 * 1024 * 1024)).status_code, 413)
-        response = self.client.get('/api/datasets/sample.csv')
+        response = self.client.get('/api/datasets/mlran.csv')
         self.assertEqual(response.status_code, 200)
-        self.assertIn('trace_id,window_index,label', response.text)
+        self.assertIn('sample_id,sample_type', response.text)
         response.close()
+
+    def test_blank_telemetry_template_has_only_the_real_required_headers(self):
+        response = self.client.get('/api/datasets/telemetry-template.csv')
+        self.assertEqual(response.status_code, 200)
+        rows = list(csv.reader(io.StringIO(response.text)))
+        self.assertEqual(rows, [['trace_id', 'window_index', 'label', *FEATURE_NAMES]])
+        response.close()
+        g.pop('_login_user', None)
+        self.assertEqual(self.app.test_client().get('/api/datasets/telemetry-template.csv').status_code, 302)
 
     def test_csv_formula_is_escaped(self):
         payload = self.fixture().replace(b'fixture', b'=1+1')
@@ -139,7 +153,17 @@ class RunTests(unittest.TestCase):
 
     def test_csrf_required_for_mutation(self):
         self.app.config['WTF_CSRF_ENABLED'] = True
-        self.assertEqual(self.client.post('/api/monitor/demo').status_code, 400)
+        self.assertEqual(self.client.post('/api/monitor/start').status_code, 400)
+
+    def test_live_monitor_status_explains_real_file_burst_policy(self):
+        response = self.client.get('/api/monitor/status')
+        self.assertEqual(response.status_code, 200)
+        policy = response.json['live_policy']
+        self.assertEqual(policy['name'], 'Rolling file-burst rules')
+        self.assertEqual(policy['alert_thresholds']['deleted_files'], 10)
+        self.assertEqual(policy['alert_thresholds']['modified_files'], 20)
+        self.assertFalse(policy['automatic_quarantine'])
+        self.assertIn('not a probability', policy['score_type'])
 
     def test_included_mlran_runs_and_exports_real_published_predictions(self):
         response = self.client.post('/api/runs/mlran')
@@ -149,19 +173,58 @@ class RunTests(unittest.TestCase):
         self.assertEqual(run['result']['windows'], 324)
         self.assertEqual(run['result']['training_overlap_samples'], 0)
         self.assertAlmostEqual(run['result']['metrics']['accuracy'], 301 / 324)
-        self.assertEqual(len(run['incident']['response']['files']), 102)
+        self.assertEqual(run['incident']['response']['files'], [])
+        self.assertEqual(run['incident']['response']['quarantine'], 'no_files')
         self.assertIn('XGBoost', run['incident']['details'])
         report = self.client.get(f"/api/runs/{run['id']}/report.csv")
         self.assertIn('active_file_indicators', report.text)
 
-    def test_local_transfer_is_explicitly_not_network_and_has_unique_ids(self):
-        first = self.client.post('/api/runs/local-transfer')
-        self.assertEqual(first.status_code, 200, first.json)
-        run = first.json['run']
-        self.assertEqual(run['result']['transfer']['transport'], 'local_demo (no network transfer)')
-        self.assertEqual(run['result']['transfer']['integrity'], 'verified')
-        second = self.client.post('/api/runs/local-transfer').json['run']
-        self.assertNotEqual(run['id'], second['id'])
+    def test_silrad_uses_its_published_heldout_split_when_prepared(self):
+        silrad = Path(self.app.instance_path) / 'silrad'
+        if not (silrad / 'fasttext-testmodel.csv').is_file() or not (silrad / 'metadata.json').is_file():
+            self.skipTest('Run scripts/setup_silrad.py to prepare the local SILRAD data.')
+        response = self.client.post('/api/runs/silrad')
+        self.assertEqual(response.status_code, 200, response.json)
+        run = response.json['run']
+        self.assertEqual(run['result']['dataset_schema'], 'silrad')
+        self.assertEqual(run['result']['windows'], 156841)
+        self.assertEqual(run['result']['class_counts'], {'benign': 137312, 'ransomware': 19529})
+        self.assertEqual(sum(run['result']['confusion_matrix'].values()), 156841)
+        self.assertNotIn('CommandLine', str(run['result']))
+        predictions = self.client.get(f"/api/runs/{run['id']}/predictions.csv")
+        self.assertEqual(predictions.status_code, 200)
+        self.assertIn('row_number,actual_class,predicted_class,probability,correct', predictions.text[:200])
+        predictions.close()
+        status = self.client.get('/api/silrad/status')
+        self.assertEqual(status.status_code, 200)
+        self.assertTrue(status.json['ready'])
+        self.assertAlmostEqual(status.json['metrics']['recall'], 1986 / 19529)
+
+    def test_demo_endpoints_are_removed(self):
+        self.assertEqual(self.client.post('/api/monitor/demo').status_code, 404)
+        self.assertIn(self.client.post('/api/runs/local-transfer').status_code, (404, 405))
+        self.assertEqual(self.client.get('/api/datasets/sample.csv').status_code, 404)
+        self.assertEqual(self.client.get('/downloads/').status_code, 404)
+
+    def test_pwa_routes_and_no_account_data_in_service_worker_cache(self):
+        manifest = self.client.get('/manifest.webmanifest')
+        self.assertEqual(manifest.status_code, 200)
+        self.assertEqual(manifest.mimetype, 'application/manifest+json')
+        self.assertEqual(manifest.headers['Cache-Control'], 'no-cache')
+        self.assertIn('standalone', manifest.text)
+        self.assertIn('icon-192.png', manifest.text)
+        manifest.close()
+        worker = self.client.get('/service-worker.js')
+        self.assertEqual(worker.status_code, 200)
+        self.assertEqual(worker.headers['Service-Worker-Allowed'], '/')
+        self.assertIn("url.pathname.startsWith('/api/')", worker.text)
+        worker.close()
+        offline = self.client.get('/offline')
+        self.assertIn('RansomShield is offline', offline.text)
+        offline.close()
+
+    def test_monitor_target_starts_without_synthetic_seed_files(self):
+        self.assertEqual(list((self.root/'decoy').iterdir()), [])
 
     def test_mlran_labels_are_not_prediction_features(self):
         from app.mlran import evaluate_dataset

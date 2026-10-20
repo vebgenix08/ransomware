@@ -1,61 +1,28 @@
 from datetime import datetime, timezone
+from collections import deque
 from pathlib import Path
 from queue import Empty, Full, Queue
 from threading import Event, Lock, Thread
+from time import monotonic
 from typing import Dict, Optional, Set, Tuple
 from uuid import uuid4
 
 import psutil
 
-from .detector import BehavioralDetector
 from .extensions import db
 from .models import Alert, MonitoringEvent
 
 
 FileState = Tuple[int, int]
-CANARY_NAMES = {
-    "Finance/Salary_Data.xlsx",
-    "HR/Employee_Data.xlsx",
-    "Backup/database_backup.sql",
-}
-
-DECOY_FILES = {
-    "Finance/Financial_Report.pdf": "Synthetic quarterly financial report. No real data.\n",
-    "Finance/Budget_2026.xlsx": "Synthetic budget workbook placeholder. No real data.\n",
-    "Finance/Salary_Data.xlsx": "RANSOMSHIELD CANARY: synthetic salary data.\n",
-    "HR/Employee_Data.xlsx": "RANSOMSHIELD CANARY: synthetic employee data.\n",
-    "HR/Employee_Records.pdf": "Synthetic employee records. No real data.\n",
-    "Backup/backup_2026.zip": "Synthetic backup placeholder. No archive content.\n",
-    "Backup/database_backup.sql": "RANSOMSHIELD CANARY: synthetic database backup.\n",
-    "Documents/Customer_List.csv": "name,account\nSynthetic Customer,DEMO-001\n",
-    "Documents/Strategy.docx": "Synthetic strategy document. No real data.\n",
-    "Backup/restore_point_01.tmp": "Disposable synthetic restore point.\n",
-    "Backup/restore_point_02.tmp": "Disposable synthetic restore point.\n",
-    "Backup/restore_point_03.tmp": "Disposable synthetic restore point.\n",
-    "Documents/archive_copy_01.tmp": "Disposable synthetic archive copy.\n",
-    "Documents/archive_copy_02.tmp": "Disposable synthetic archive copy.\n",
-}
-DISPOSABLE_NAMES = {name for name in DECOY_FILES if name.endswith(".tmp")}
 
 QUEUE_LIMIT = 5000
 RECONCILE_SECONDS = 30.0
-
-
-# --- Shared helpers: used by live monitoring and by isolated simulation runs ---
-
-def seed_decoy_server(root: Path) -> None:
-    """Create an attractive but entirely synthetic server-like directory tree."""
-    for relative_name, content in DECOY_FILES.items():
-        path = root / Path(relative_name)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if not path.exists():
-            path.write_text(content, encoding="utf-8")
-    readme = root / "DECOY_NOTICE.txt"
-    if not readme.exists():
-        readme.write_text(
-            "Controlled RansomShield decoy environment. All content is synthetic.\n",
-            encoding="utf-8",
-        )
+ACTIVITY_WINDOW_SECONDS = 30.0
+DELETE_ALERT_THRESHOLD = 10
+MODIFY_ALERT_THRESHOLD = 20
+MIXED_ALERT_THRESHOLD = 30
+MIN_DESTRUCTIVE_CHANGES = 10
+ALERT_COOLDOWN_SECONDS = 60.0
 
 
 def take_snapshot(root: Path) -> Dict[str, FileState]:
@@ -69,24 +36,6 @@ def take_snapshot(root: Path) -> Dict[str, FileState]:
         except OSError:
             continue
     return snapshot
-
-
-def create_safe_demo_files(root: Path, batch_id: str, count: int = 24) -> int:
-    """Generate a harmless burst and modify canaries in an isolated directory."""
-    seed_decoy_server(root)
-    batch_path = root / "Incoming" / f"simulation_{batch_id}"
-    batch_path.mkdir(parents=True, exist_ok=True)
-    for index in range(count):
-        (batch_path / f"document_{index + 1:02d}.locked-demo").write_text(
-            f"Harmless RansomShield simulation artifact {index + 1}; no encryption occurred.\n",
-            encoding="utf-8",
-        )
-    for relative_name in sorted(CANARY_NAMES):
-        path = root / Path(relative_name)
-        path.write_text(path.read_text(encoding="utf-8") + "Safe simulation touch.\n", encoding="utf-8")
-    for relative_name in sorted(DISPOSABLE_NAMES):
-        (root / Path(relative_name)).unlink(missing_ok=True)
-    return count + len(CANARY_NAMES) + len(DISPOSABLE_NAMES)
 
 
 class _WatchCollector:
@@ -154,7 +103,7 @@ class _WatchCollector:
 
 
 class MonitoringService:
-    """Safely monitor system metrics and one isolated demonstration directory."""
+    """Monitor system metrics and file activity in one configured directory."""
 
     def __init__(self) -> None:
         self.app = None
@@ -167,6 +116,8 @@ class MonitoringService:
         self._snapshot: Dict[str, FileState] = {}
         self._queue: Queue = Queue(maxsize=QUEUE_LIMIT)
         self._collector = _WatchCollector(self)
+        self._activity_window = deque()
+        self._last_burst_alert_at = 0.0
         self._metrics = {
             "cpu_percent": 0.0,
             "memory_percent": 0.0,
@@ -174,9 +125,7 @@ class MonitoringService:
             "last_check": None,
             "last_successful_scan": None,
             "last_risk_score": 0,
-            "canary_triggered": False,
-            "canary_files": len(CANARY_NAMES),
-            "decoy_files": 0,
+            "monitored_files": 0,
             "dropped_events": 0,
             "queue_depth": 0,
             "collector": "poll",
@@ -187,13 +136,8 @@ class MonitoringService:
         self.app = app
         self.interval_seconds = float(app.config.get("MONITOR_INTERVAL_SECONDS", 2.0))
         self.reconcile_seconds = float(app.config.get("MONITOR_RECONCILE_SECONDS", RECONCILE_SECONDS))
-        self.target_path = Path(app.config.get("MONITOR_TARGET_PATH", Path(app.instance_path) / "decoy_server"))
+        self.target_path = Path(app.config.get("MONITOR_TARGET_PATH", Path(app.instance_path) / "monitor_target"))
         self.target_path.mkdir(parents=True, exist_ok=True)
-        seed_decoy_server(self.target_path)
-        model_path = Path(app.root_path) / "artifacts" / "behavioral_model.json"
-        self.detector = BehavioralDetector(model_path)
-        if not self.detector.is_ready:
-            app.logger.warning("Behavioral model unavailable: %s", self.detector.load_error)
         app.extensions["monitoring_service"] = self
 
     @property
@@ -206,13 +150,13 @@ class MonitoringService:
                 return False
 
             self._snapshot = take_snapshot(self.target_path)
-            self.detector.history.clear()
+            self._activity_window.clear()
+            self._last_burst_alert_at = 0.0
             while True:
                 try:
                     self._queue.get_nowait()
                 except Empty:
                     break
-            self._metrics["canary_triggered"] = False
             self._metrics["last_activity"] = {}
             self._metrics["last_successful_scan"] = datetime.now(timezone.utc).isoformat()
             self._stop_event.clear()
@@ -243,20 +187,13 @@ class MonitoringService:
         return {
             "running": self.is_running,
             "connection_state": "Connected" if self.is_running else "Stopped",
-            "model_state": self.detector.display_name,
-            "target": "instance/decoy_server",
-            "decoy_directories": sorted({name.split("/", 1)[0] for name in DECOY_FILES}),
+            "model_state": "Rolling burst rules",
+            "target": str(self.target_path),
             "interval_seconds": self.interval_seconds,
             "reconcile_seconds": self.reconcile_seconds,
             "auto_quarantine": self.app.config["AUTO_QUARANTINE"],
             **metrics,
         }
-
-    def create_safe_demo_files(self, batch_id: str, count: int = 24) -> int:
-        """Generate a harmless burst and modify canaries in the isolated decoy."""
-        if not self.target_path:
-            return 0
-        return create_safe_demo_files(self.target_path, batch_id, count)
 
     def _drain_events(self) -> Set[Tuple[str, str]]:
         """Drain notifications into a deduplicated set for this cycle."""
@@ -269,6 +206,17 @@ class MonitoringService:
         with self._lock:
             self._metrics["queue_depth"] = self._queue.qsize()
         return events
+
+    def ingest_remote_event(self, agent_name: str, operation: str, relative_path: str) -> bool:
+        """Feed an authenticated endpoint event into the same burst window."""
+        safe_path = f"[agent:{agent_name}]/{relative_path}"
+        try:
+            self._queue.put_nowait((operation, safe_path))
+            return True
+        except Full:
+            with self._lock:
+                self._metrics["dropped_events"] += 1
+            return False
 
     def _diff_snapshot(self, current: Dict[str, FileState]) -> Tuple[Set[str], Set[str], Set[str]]:
         previous_paths = set(self._snapshot)
@@ -303,7 +251,7 @@ class MonitoringService:
         modified = {path for operation, path in events if operation == "modified"}
         deleted = {path for operation, path in events if operation == "deleted"}
 
-        # Diffing every cycle is cheap for a decoy tree and keeps detection
+        # Diffing each cycle keeps detection
         # working when watchdog is unavailable or missed an event.
         current_snapshot = take_snapshot(self.target_path)
         snapshot_created, snapshot_modified, snapshot_deleted = self._diff_snapshot(current_snapshot)
@@ -312,6 +260,9 @@ class MonitoringService:
         modified |= snapshot_modified
         deleted |= snapshot_deleted
         deleted -= created  # a move reported as delete+create is one file, not two
+        # New files may emit both created and modified notifications while
+        # they are being written. Count them once as created in this cycle.
+        modified -= created
         for path in created | modified:
             deleted.discard(path)
         for path in deleted:
@@ -322,40 +273,37 @@ class MonitoringService:
         process_count = len(psutil.pids())
         file_changes = len(created) + len(modified) + len(deleted)
         touched: Set[str] = created | modified | deleted
-        canaries_touched = touched & CANARY_NAMES
-        canaries_modified = modified & CANARY_NAMES
         directories_touched = {Path(path).parts[0] for path in touched if Path(path).parts}
         operation_rate = round(file_changes / max(self.interval_seconds, 0.1), 2)
-        fallback_risk_score = min(
-            100,
-            file_changes * 7
-            + len(deleted) * 8
-            + (15 if cpu_percent >= 90 else 0)
-            + (10 if memory_percent >= 92 else 0)
-            + (35 if canaries_touched else 0)
-            + min(20, round(operation_rate)),
+        now_monotonic = monotonic()
+        if file_changes:
+            self._activity_window.append((now_monotonic, frozenset(created), frozenset(modified), frozenset(deleted)))
+        cutoff = now_monotonic - ACTIVITY_WINDOW_SECONDS
+        while self._activity_window and self._activity_window[0][0] < cutoff:
+            self._activity_window.popleft()
+
+        window_created = set().union(*(item[1] for item in self._activity_window)) if self._activity_window else set()
+        window_modified = set().union(*(item[2] for item in self._activity_window)) if self._activity_window else set()
+        window_deleted = set().union(*(item[3] for item in self._activity_window)) if self._activity_window else set()
+        window_touched = window_created | window_modified | window_deleted
+        window_total = len(window_touched)
+        window_destructive = len(window_modified | window_deleted)
+        # This explainable activity score is not a probability or a malware
+        # classification. Live alerts use only the explicit burst rules below.
+        risk_score = min(100, round(100 * max(
+            len(window_deleted) / DELETE_ALERT_THRESHOLD,
+            len(window_modified) / MODIFY_ALERT_THRESHOLD,
+            window_total / MIXED_ALERT_THRESHOLD,
+        )))
+        burst_detected = (
+            len(window_deleted) >= DELETE_ALERT_THRESHOLD
+            or len(window_modified) >= MODIFY_ALERT_THRESHOLD
+            or (window_total >= MIXED_ALERT_THRESHOLD and window_destructive >= MIN_DESTRUCTIVE_CHANGES)
         )
-        probability = self.detector.predict_probability(
-            {
-                "created_count": len(created),
-                "modified_count": len(modified),
-                "deleted_count": len(deleted),
-                "cpu_percent": cpu_percent,
-                "memory_percent": memory_percent,
-                "process_count": process_count,
-                "canary_accessed": int(bool(canaries_touched)),
-                "canary_modified": int(bool(canaries_modified)),
-                "decoy_files_touched": file_changes,
-                "directories_touched": len(directories_touched),
-                "operation_rate": operation_rate,
-            }
-        )
-        risk_score = fallback_risk_score if probability is None else round(probability * 100)
         now = datetime.now(timezone.utc).isoformat()
 
         with self._lock:
             previous_activity = self._metrics.get("last_activity", {})
-            previous_canary = bool(self._metrics.get("canary_triggered", False))
             self._metrics = {
                 **self._metrics,
                 "cpu_percent": cpu_percent,
@@ -364,9 +312,7 @@ class MonitoringService:
                 "last_check": now,
                 "last_successful_scan": now,
                 "last_risk_score": risk_score,
-                "canary_triggered": previous_canary or bool(canaries_touched),
-                "canary_files": len(CANARY_NAMES),
-                "decoy_files": len(self._snapshot),
+                "monitored_files": len(self._snapshot),
                 "last_activity": ({
                     "created": len(created),
                     "modified": len(modified),
@@ -379,22 +325,33 @@ class MonitoringService:
 
         if file_changes:
             details = (
-                f"Observed {file_changes} decoy-server changes "
+                f"Observed {file_changes} monitored-directory changes "
                 f"({len(created)} created, {len(modified)} modified, {len(deleted)} deleted; "
                 f"{operation_rate} operations/s)."
             )
-            if canaries_touched:
-                details += f" Canary triggered: {', '.join(sorted(canaries_touched))}."
-            severity = "warning" if risk_score >= 60 else "info"
+            severity = "warning" if burst_detected else "info"
             self._persist_event("file_activity", severity, details, risk_score, source="reconcile" if reconcile else "watchdog")
 
-            if risk_score >= 60:
+            if burst_detected and now_monotonic - self._last_burst_alert_at >= ALERT_COOLDOWN_SECONDS:
+                self._last_burst_alert_at = now_monotonic
+                burst_details = (
+                    f"High-volume file-change burst across {window_total} distinct files in "
+                    f"{int(ACTIVITY_WINDOW_SECONDS)} seconds ({len(window_created)} created, "
+                    f"{len(window_modified)} modified, {len(window_deleted)} deleted). "
+                    "Review this activity; this rule is an anomaly signal, not a malware verdict."
+                )
+                burst_score = max(risk_score, 60)
+                severe_burst = (
+                    len(window_deleted) >= 2 * DELETE_ALERT_THRESHOLD
+                    or len(window_modified) >= 2 * MODIFY_ALERT_THRESHOLD
+                    or (window_total >= 2 * MIXED_ALERT_THRESHOLD and window_destructive >= 2 * MIN_DESTRUCTIVE_CHANGES)
+                )
                 self._persist_alert(
-                    "Canary and ransomware-like activity" if canaries_touched else "Unusual file activity burst",
-                    details,
-                    "high" if risk_score >= 85 else "medium",
-                    risk_score,
-                    touched,
+                    "High-volume file-change burst",
+                    burst_details,
+                    "high" if severe_burst else "medium",
+                    burst_score,
+                    window_touched,
                 )
 
     def _persist_event(        self,
@@ -426,6 +383,7 @@ class MonitoringService:
         severity: str,
         risk_score: int,
         affected=None,
+        model_version: str = "rolling-file-burst-v1",
     ) -> None:
         if not self.app:
             return
@@ -435,18 +393,20 @@ class MonitoringService:
                     details=details,
                     severity=severity,
                     risk_score=risk_score,
-                    model_version=self.detector.display_name,
+                    model_version=model_version,
                     rule_trace=[
-                        {"signal": "files_touched", "value": len(affected or ())},
-                        {"signal": "canary_accessed", "value": bool(set(affected or ()) & CANARY_NAMES)},
+                        {"signal": "files_touched_in_window", "value": len(affected or ())},
                         {"signal": "risk_score", "value": risk_score},
+                        {"signal": "policy", "value": "rolling-file-burst-v1"},
                     ],
                 )
             db.session.add(alert)
             db.session.commit()
             if risk_score >= 60:
                 from .response import respond
-                action = respond(self.app, alert, self.target_path, affected or set(), quarantine_allowed=risk_score >= 85)
+                # File-change volume alone is not sufficient evidence for an
+                # automatic file move. Keep the response audit-only.
+                action = respond(self.app, alert, self.target_path, affected or set(), quarantine_allowed=False)
                 # Suppress only our own removals, retaining concurrent external changes.
                 for record in action.result["files"]:
                     if record["status"] == "quarantined":

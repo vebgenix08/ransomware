@@ -5,3 +5,4 @@ venv/
 .env
 .flaskenv
 instance/
+.playwright-cli/

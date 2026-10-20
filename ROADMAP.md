@@ -1,68 +1,35 @@
 # RansomShield implementation status
 
-Updated 2026-10-14. Completed means implemented and locally tested, not production
-certification or verification across two physical laptops.
+Updated 2026-10-20. “Implemented” means present and locally tested. It does not mean production-certified or validated against live ransomware.
 
-| Phase | Status | Evidence / remaining work |
+| Area | Status | Current behavior and remaining work |
 |---|---|---|
-| Flask accounts and dashboard | Completed | Existing login/CSRF; dashboard rendering and authenticated API tests |
-| TCN + XGBoost synthetic training | Completed | Reproducible trainer, trained TCN kernels and XGBoost artifacts; frozen inference tests |
-| Safe simulation and automatic response | Completed | Each invocation has its own UUID/directory; suspicious run quarantines generated test files; missing files audited |
-| CSV evaluation and run history | Completed | Labeled two-second telemetry validation; isolated trace history; metrics, hashes, persisted completed/failed runs |
-| Incident details and CSV reports | Completed | Run/alert IDs, UTC timestamp, prediction, risk, activity, per-file response and notification status |
-| Configurable notifications | Completed locally | Environment-configured HTTPS webhook and STARTTLS SMTP; mocked success/failure tests; disabled until configured |
-| Live delivery to user's email/webhook | Planned | Requires actual destination/server credentials and a delivery check |
-| MLRan tabular integration | Completed locally | Public CSV acquired; separate XGBoost trained on 2,300 cleaned samples and evaluated on 324 held-out samples; dashboard and transfer ingestion enabled |
-| Published-data temporal TCN validation | Planned | MLRan matrix has no temporal sequence; existing TCN remains synthetic-trained |
-| Two-laptop transfer automation | Completed locally | SFTP sender, checksum-validating inbox receiver, automatic detection/response, owner dashboard and result receipt; local processing and mocked transport tests |
-| Physical two-laptop secure transfer | Planned | Windows SSH Server/key/network setup and Laptop 1 access still needed; actual network transfer not performed |
-| Published MLRan held-out evaluation | Completed locally | Accuracy 92.90%, precision 85.29%, recall 91.58%, F1 88.32%; upstream selection bias remains |
-| Prospective endpoint validation | Planned | No real-world deployment or family-disjoint validation claimed |
-| Production endpoint protection | Planned | Process attribution, endpoint agent, deployment hardening, external validation and durable background jobs |
-| Startup hardening | Completed | Refuses to start without `SECRET_KEY`; waitress by default; `FLASK_DEBUG` opt-in |
-| Schema migrations | Completed | Flask-Migrate revisions 0001–0003; existing databases stamped, not recreated |
-| Windows event collection | Completed locally | watchdog observations feed a bounded queue with drop counting; per-cycle snapshot diff and 30 s reconciliation |
-| Quarantine recovery | Completed | Hash-verified restore; `QUARANTINE_MODE=dry-run` records proposed actions |
-| Model registry | Completed | Loaded artifacts recorded by SHA-256; alerts carry the model version and contributing signals |
-| Authenticated release downloads | Completed | `/downloads` with manifest checksums, server-side re-verification and download audit log |
-| Offline dashboard | Completed | Bootstrap, icons and Alpine vendored; no CDN requests |
-| XGBoost-only baseline and false-positive measurement | Planned | Compare against the hybrid; measure alerts per hour of benign activity |
-| Process attribution | Planned | Requires ETW or Sysmon; filesystem notifications alone do not supply it |
+| Accounts and dashboard | Implemented | Flask authentication, CSRF, account-owned run history, incident reports |
+| Directory monitoring | Implemented locally; remote agent added | Watches `MONITOR_TARGET_PATH`; an opt-in Windows agent can forward VM event summaries over HTTPS into the same rolling 30-second burst rules. Process attribution is unavailable; the activity score is heuristic, not a malware probability. |
+| TCN + XGBoost telemetry model | Offline CSV only | Frozen artifact is trained on synthetic sequences and does not drive live folder alerts. Replace it with independently sourced, labeled endpoint telemetry before using it for detection claims. |
+| MLRan evaluation | Implemented locally | Separate tabular XGBoost model on published MLRan data; sampling limitations apply. |
+| SILRAD Sysmon evaluation | Implemented locally | Setup script downloads SILRAD's separate train/test files into ignored `instance/`, trains a project-specific hashed-text XGBoost model on 39,999 training events, then evaluates 156,841 held-out events. Fixed-threshold recall is 10.17% (17,543 false negatives); benchmark only, unsuitable for live alerts. |
+| Dataset analysis | Implemented | Compatible CSV formats, ownership, metrics, hashes, reports; CSV paths are not used to modify local files. |
+| Automated response | Audit-only for live alerts | Live burst alerts never move files because change volume alone does not establish malware. Dataset analysis also never moves local files. |
+| Notifications | Configured locally | Gmail SMTP settings stored in ignored `.env`; real delivery still requires a successful live message check. Mock tests do not validate Gmail. |
+| SFTP transfer | Implemented locally | Sender/receiver checksum validation and idempotency tests pass; a physical two-laptop transfer remains unverified. |
+| PWA | Implemented | Install manifest, root-scoped service worker, static asset cache, offline page. Authenticated data and API responses are not cached. |
+| Production endpoint protection | Not complete | Needs real labeled data, process attribution, independent validation, HTTPS deployment, configured PostgreSQL/backups, durable jobs, and incident recovery testing. A VM agent is now available but requires an HTTPS host and an actual VM connection test. |
 
-## Model and response policies
+## Safety and evaluation policy
 
-- Run prediction uses the frozen model's probability threshold (currently 0.60).
-- Every suspicious simulation/dataset run invokes quarantine of only generated
-  test files, unless `AUTO_QUARANTINE=false`; notification delivery is attempted.
-- Background monitoring retains its existing 60 risk alert / 85 risk quarantine
-  policy. Medium-risk background alerts now also receive notification audits.
-- A completed run may have failed notifications or partial quarantine. The UI
-  and report show these independently. Deleted test files cannot be quarantined.
-- CSV reports satisfy the requested PDF **or** CSV format. PDF export is not implemented.
-- Existing live-monitor events are shared workspace telemetry; new run records
-  and their associated alerts/reports are restricted to their creating account.
-- Quarantine is reversible: `QuarantineItem` stores the original relative path
-  and SHA-256, and restore refuses if the hash, path or destination changed.
-  `QUARANTINE_MODE=dry-run` validates and records `would_quarantine` without
-  moving anything.
-- Alerts record `model_version` (`display_name@artifact_sha256[:12]`) and a
-  `rule_trace` listing the signals that contributed to the decision.
+- Uploaded dataset runs only create analysis and incident records. Their CSV paths are never used as filesystem paths.
+- Live monitoring is limited to the configured directory and uses a 30-second heuristic burst policy. Alerts still can be false positives or misses; a high-volume benign update can cross the thresholds.
+- The synthetic-trained telemetry model is used only for offline telemetry CSV evaluation. It and the MLRan tabular model have different schemas and are not interchangeable.
+- MLRan scores describe the included dataset only. They do not establish prospective endpoint performance.
+- Email status `sent` means SMTP accepted the message; it is not an inbox delivery receipt.
 
 ## Verification
 
-Latest local verification: **46 tests passed**, including release-download
-authorisation, traversal and tamper rejection, quarantine restore, dry-run,
-hash recording, published MLRan runs, local sender/receiver processing, label
-exclusion, transfer processing, checksum rejection, duplicate suppression and
-sender batch validation. The dashboard JavaScript has not been re-checked in a
-real browser after vendoring the assets.
+Run the local suite with:
 
-Training run: 6,000 synthetic sequences, seed 20261014, 4,800 train / 1,200 test.
-Held-out hybrid metrics at threshold 0.60: accuracy 96.50%, precision 96.99%,
-recall 94.71%, F1 95.83%, false-positive rate 2.17%. The separate 16-window demo
-fixture is a workflow smoke test, not an independent benchmark.
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
 
-Run `.\.venv\Scripts\python.exe -m unittest discover -s tests -v`.
-Tests exercise real hybrid inference on controlled benign/suspicious records,
-quarantine scope, missing files, repeat runs, malformed datasets, public-schema
-rejection, reports, notification outcomes, authentication and run ownership.
+The tests cover authentication, model inference, dataset validation, user ownership, report generation, response auditing, quarantine restore, SFTP integrity handling, and PWA routes. Mocked SMTP tests are not live-delivery verification.

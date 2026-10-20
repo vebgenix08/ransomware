@@ -67,18 +67,27 @@ def create_app(test_config: Optional[dict] = None) -> Flask:
         raise RuntimeError("SECRET_KEY still holds the development placeholder; replace it.")
 
     database_path = Path(app.instance_path) / "ransomshield.db"
+    database_uri = os.environ.get("DATABASE_URL", "").strip()
+    if database_uri.startswith("postgres://"):
+        database_uri = "postgresql://" + database_uri[len("postgres://"):]
+    if database_uri.startswith("postgresql://"):
+        database_uri = "postgresql+psycopg://" + database_uri[len("postgresql://"):]
     app.config.from_mapping(
+        APP_NAME=os.environ.get("APP_NAME", "RansomShield"),
         SECRET_KEY=secret_key,
-        SQLALCHEMY_DATABASE_URI=f"sqlite:///{database_path.as_posix()}",
+        SQLALCHEMY_DATABASE_URI=database_uri or f"sqlite:///{database_path.as_posix()}",
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "false").lower() == "true",
         MAX_CONTENT_LENGTH=5 * 1024 * 1024,
         RUNS_PATH=str(Path(app.instance_path) / "runs"),
-        AUTO_QUARANTINE=os.environ.get("AUTO_QUARANTINE", "true").lower() == "true",
-        QUARANTINE_MODE=os.environ.get("QUARANTINE_MODE", "enabled").lower(),
+        # Fail closed: automatic quarantine is opt-in and requires validated
+        # detection plus a deliberate deployment-level setting.
+        AUTO_QUARANTINE=os.environ.get("AUTO_QUARANTINE", "false").lower() == "true",
+        QUARANTINE_MODE=os.environ.get("QUARANTINE_MODE", "dry-run").lower(),
         QUARANTINE_PATH=str(Path(app.instance_path) / "quarantine"),
+        MONITOR_TARGET_PATH=os.environ.get("MONITOR_TARGET_PATH", str(Path(app.instance_path) / "monitor_target")),
         RESPONSE_WEBHOOK_URL=os.environ.get("RESPONSE_WEBHOOK_URL", ""),
         RESPONSE_EMAIL_TO=os.environ.get("RESPONSE_EMAIL_TO", ""),
         RESPONSE_EMAIL_FROM=os.environ.get("RESPONSE_EMAIL_FROM", ""),
@@ -87,11 +96,29 @@ def create_app(test_config: Optional[dict] = None) -> Flask:
         SMTP_USERNAME=os.environ.get("SMTP_USERNAME", ""),
         SMTP_PASSWORD=os.environ.get("SMTP_PASSWORD", ""),
         SMTP_SECURITY=os.environ.get("SMTP_SECURITY", "starttls").lower(),
-        RELEASE_PATH=str(Path(app.instance_path) / "releases"),
+        AUTH_PROVIDER=os.environ.get("AUTH_PROVIDER", "local").strip().lower(),
+        FIREBASE_API_KEY=os.environ.get("FIREBASE_API_KEY", "").strip(),
+        FIREBASE_AUTH_DOMAIN=os.environ.get("FIREBASE_AUTH_DOMAIN", "").strip(),
+        FIREBASE_PROJECT_ID=os.environ.get("FIREBASE_PROJECT_ID", "").strip(),
+        FIREBASE_MESSAGING_SENDER_ID=os.environ.get("FIREBASE_MESSAGING_SENDER_ID", "").strip(),
+        FIREBASE_APP_ID=os.environ.get("FIREBASE_APP_ID", "").strip(),
+        AGENT_API_TOKEN=os.environ.get("AGENT_API_TOKEN", "").strip(),
     )
 
     if test_config:
         app.config.update(test_config)
+
+    if app.config["AUTH_PROVIDER"] not in {"local", "firebase"}:
+        raise RuntimeError("AUTH_PROVIDER must be either 'local' or 'firebase'.")
+    if app.config["AUTH_PROVIDER"] == "firebase":
+        missing_firebase = [
+            key for key in ("FIREBASE_API_KEY", "FIREBASE_AUTH_DOMAIN", "FIREBASE_PROJECT_ID",
+                            "FIREBASE_MESSAGING_SENDER_ID", "FIREBASE_APP_ID")
+            if not app.config.get(key)
+        ]
+        if missing_firebase:
+            raise RuntimeError("Firebase Authentication is selected but Firebase web config is incomplete: "
+                               + ", ".join(missing_firebase))
 
     Path(app.instance_path).mkdir(parents=True, exist_ok=True)
 
@@ -99,18 +126,29 @@ def create_app(test_config: Optional[dict] = None) -> Flask:
     login_manager.init_app(app)
     csrf.init_app(app)
     migrate.init_app(app, db)
+
+    @app.context_processor
+    def expose_auth_provider_config():
+        return {
+            "AUTH_PROVIDER": app.config["AUTH_PROVIDER"],
+            "FIREBASE_WEB_CONFIG": {
+                "apiKey": app.config["FIREBASE_API_KEY"],
+                "authDomain": app.config["FIREBASE_AUTH_DOMAIN"],
+                "projectId": app.config["FIREBASE_PROJECT_ID"],
+                "messagingSenderId": app.config["FIREBASE_MESSAGING_SENDER_ID"],
+                "appId": app.config["FIREBASE_APP_ID"],
+            },
+        }
     _configure_sqlite(app)
     MonitoringService().init_app(app)
 
     from .routes import main
     from .auth import auth
     from .api import api
-    from .downloads import downloads
 
     app.register_blueprint(main)
     app.register_blueprint(auth)
     app.register_blueprint(api)
-    app.register_blueprint(downloads)
 
     database_uri = app.config.get("SQLALCHEMY_DATABASE_URI", "")
     if database_uri in ("sqlite://", "sqlite:///:memory:"):

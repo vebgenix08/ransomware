@@ -1,327 +1,105 @@
-# RansomShield Flask Application
+# RansomShield
 
-## SMTP email through .env
+RansomShield is a local Flask research prototype for directory activity monitoring and labeled CSV evaluation. Live monitoring uses explicit rolling file-change burst rules; it reports an activity anomaly, not a ransomware verdict. The temporal TCN + XGBoost detector was trained on synthetic sequences and is used only for offline telemetry CSV evaluation. Neither path is production endpoint protection.
 
-Fill the project-root `.env` using `.env.example`: `SMTP_HOST`, `SMTP_PORT`,
-`SMTP_SECURITY`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `RESPONSE_EMAIL_FROM`, and
-`RESPONSE_EMAIL_TO`. Use your provider's SMTP credentials/app password.
-Use `starttls` with port 587 or `ssl` with port 465 as required by your provider.
-Keep passwords quoted. No plaintext SMTP mode is supported.
+## Start the application
 
-Both the web app and receiver automatically load this file when starting,
-regardless of their working directory. Existing process environment variables
-take precedence. Restart both after changes. `.env` is ignored by Git; never put
-real credentials in `.env.example` or the sender ZIP.
-
-Run a suspicious simulation to trigger email. The dashboard shows configuration
-as disabled/incomplete/configured and each incident records sent/failed/disabled.
-Sent means SMTP acceptance, not inbox delivery. Actual delivery is unverified
-until real credentials are provided; automated SMTP tests use mocks.
-
-Multi-page Flask foundation for the RansomShield behavioral ransomware detection research project.
-
-## October 2026 workflow update
-
-### Upgrade notes (2026-10-19)
-
-- **`SECRET_KEY` is required.** Add a long random value to `.env`; the app
-  refuses to start without it. Generate one with
-  `python -c "import secrets; print(secrets.token_hex(32))"`.
-- **Migrations replace automatic table creation.** Existing databases are
-  stamped at revision `0001_baseline` and upgraded in place; no data is dropped.
-  Fresh installs run `0001` → `0003` on first start.
-- **Serving.** `python run.py` now serves waitress on `127.0.0.1:5000`.
-  Set `FLASK_DEBUG=true` only for local development.
-- **Monitoring.** Windows file notifications feed a bounded queue; a full
-  snapshot sweep runs every `MONITOR_RECONCILE_SECONDS` (default 30) to catch
-  anything the notifications missed. Dropped events are counted and shown on
-  the dashboard.
-- **Quarantine is reversible.** `QUARANTINE_MODE=dry-run` records what would be
-  moved without touching files. Restore verifies the stored SHA-256, the
-  original path and the destination before moving anything back.
-- **Downloads.** `/downloads` lists packaged releases with checksums. Build one
-  with `python scripts/build_release.py --version 1.1.0`; credentials and the
-  local database are never packaged.
-- **Offline assets.** Bootstrap, Bootstrap Icons and Alpine are vendored under
-  `app/static/vendor/`; the dashboard no longer requires internet access.
-
-### Earlier workflow
-
-Restart the application after updating. New tables are created automatically;
-existing users, alerts and events are retained. See [ROADMAP.md](ROADMAP.md) for
-verified work and remaining external dependencies.
-
-1. Sign in and open **Dashboard**. Expand **Model training status** to inspect
-   training source, timestamp, sample counts and held-out metrics.
-2. Click **Simulate activity**. Monitoring need not be running. The server creates
-   an isolated synthetic directory, analyzes its recorded activity with the frozen
-   TCN + XGBoost model, and automatically quarantines affected test files when the
-   prediction is suspicious. Five already-deleted files appear as failed moves.
-3. Alternatively, download the safe CSV from the dashboard or use
-   `data/safe_demo.csv`, select it, enter its name/source, and click **Analyze CSV**.
-   For this fixture use source `locally generated synthetic demonstration`.
-4. **Run history** updates immediately and every three seconds, including benign
-   and failed evaluations. Each execution has a persistent UUID, incident link,
-   risk, prediction, activity totals, metrics and response audit.
-5. Download each run/incident's **CSV report**. It contains the requested incident
-   fields, per-window observations/predictions, per-file quarantine results,
-   notification status, model/dataset hashes and evaluation limitations.
-
-The retrained model uses 6,000 synthetic sequences: 4,800 training and 1,200
-held-out testing, seed `20261014`, threshold `0.60`. Held-out hybrid accuracy is
-96.50%, precision 96.99%, recall 94.71%, F1 95.83%, false-positive rate 2.17%.
-These are synthetic results, not ML-Ran/RanDe-W11 validation. TCN weights and
-XGBoost are actually trained; scaling is fit only on the training split.
-
-The unmodified public RanDe-W11 CSV preview is included under `data/`, with source,
-license and hash in [data/README.md](data/README.md). Its feature schema is
-incompatible with the current model and is explicitly rejected. Published MLRan training is now complete using a separate tabular XGBoost model; no temporal features are fabricated. See the current status below.
-
-### Secure Laptop 1 → Laptop 2 transfer
-
-For **automatic analysis as soon as the CSV arrives**, use the new Windows
-[two-laptop setup guide](TWO_LAPTOP_SETUP.md): run `scripts/receive_dataset.py`
-on Laptop 2 and `scripts/send_dataset.py` on Laptop 1. The receiver checks the
-SHA-256 manifest, creates an account-owned run, invokes the model/response pipeline,
-and returns its result over SFTP. `Laptop1_Sender.zip` contains only the standalone
-sender, safe synthetic sample and instructions. No model or secrets are bundled.
-
-The plain-copy procedure below is an alternative that requires manual upload:
-
-Use an existing SSH/SFTP service on Laptop 2 over the private Wi-Fi network. Verify
-its host-key fingerprint directly on Laptop 2 before accepting it. No transfer
-has been performed here because the destination/access details are not supplied.
-
-On Laptop 1, replace `laptop2-user` and `LAPTOP2-IP` with the real SSH destination:
-
-```powershell
-Get-FileHash .\data\safe_demo.csv -Algorithm SHA256
-scp .\data\safe_demo.csv laptop2-user@LAPTOP2-IP:safe_demo.csv
-```
-
-On Laptop 2, compare the received checksum with Laptop 1, start RansomShield
-locally, sign in and upload the received CSV through the dashboard:
-
-```powershell
-Get-FileHash .\safe_demo.csv -Algorithm SHA256
-.\.venv\Scripts\python.exe run.py
-```
-
-Only CSV records move between laptops; no malware is executed. The existing Flask
-debug server should remain on localhost. SSH/SFTP provides the encrypted transfer;
-sharing a Wi-Fi network alone does not encrypt an HTTP upload.
-
-### Run and notification behavior
-
-Notifications remain configurable through the environment variables below, and
-the dashboard shows which channels are configured without exposing secrets.
-Every suspicious simulation/dataset run attempts notifications. Medium-risk live
-monitor alerts now also get notification audits, while the background monitor's
-quarantine threshold remains 85. Explicit runs quarantine test files at the model
-decision threshold unless `AUTO_QUARANTINE=false`.
-
-`sent` means accepted by the SMTP server or a successful HTTP response; it does
-not prove the recipient read the alert. Real delivery requires the user's SMTP
-credentials/webhook. Success/failure paths were tested with mocks only.
-
-Uploaded requests are limited to 5 MB and 2,000 windows. Runs are synchronous;
-use smaller batches split at trace boundaries. Uploaded path fields are ignored
-for quarantine; the application generates harmless stand-ins for suspicious
-dataset windows. New run records/reports are owned by their creating account;
-legacy background-monitor events remain shared workspace telemetry. There is no
-durable worker/retry or interrupted-run recovery yet.
-
-## Current features
-
-- Responsive public landing page
-- Light and dark themes saved in the browser
-- Account registration with validation and duplicate-email protection
-- Secure password hashing
-- Session-based sign-in and sign-out
-- CSRF-protected forms
-- Protected dashboard route
-- SQLite user storage
-- Safe post-login redirects
-- Start and stop controls for the background monitor
-- Live CPU, memory, and process-count metrics
-- Structured synthetic decoy server under `instance/decoy_server` (Finance, HR, Backup, and Documents)
-- Canary-file interaction, files/directories touched, and operation-rate telemetry
-- Persisted monitoring events and trained behavioral-model alerts
-- Safe ransomware-like create/modify/delete burst using harmless placeholder files; no encryption or malware
-- Alert acknowledgement
-- Automatic quarantine for high-risk detections (score >= 85), with per-file audit results
-- Configurable HTTPS webhook and STARTTLS email notifications
-- Frozen-model evaluation against independent telemetry CSV datasets
-
-## Project structure
-
-```text
-.
-|-- app/
-|   |-- templates/
-|   |   |-- auth/
-|   |   |   |-- signin.html
-|   |   |   `-- signup.html
-|   |   |-- base.html
-|   |   |-- dashboard.html
-|   |   `-- index.html
-|   |-- __init__.py
-|   |-- auth.py
-|   |-- extensions.py
-|   |-- forms.py
-|   |-- models.py
-|   `-- routes.py
-|-- run.py
-`-- requirements.txt
-```
-
-All custom CSS and JavaScript remain inside the HTML templates. Bootstrap, Bootstrap Icons, Tailwind CSS, and Alpine.js are loaded from CDNs.
-
-## Run locally
+From the project directory in PowerShell:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
-$env:SECRET_KEY = "replace-with-a-long-random-secret"
 python run.py
 ```
 
-Open `http://127.0.0.1:5000`.
+Open <http://127.0.0.1:5000>, create an account, and sign in. Account credentials are separate from the Gmail notification credentials in `.env`.
 
-The SQLite database is created automatically at `instance/ransomshield.db`. The `instance` directory is ignored by Git.
-
-## Available routes
-
-| Route | Purpose | Access |
-|---|---|---|
-| `/` | Landing page | Public |
-| `/auth/signup` | Create account | Public |
-| `/auth/signin` | Sign in | Public |
-| `/auth/logout` | Sign out | Authenticated session / POST |
-| `/dashboard` | Project dashboard | Sign-in required |
-| `/api/monitor/status` | Live monitor status and metrics | Sign-in required |
-| `/api/monitor/start` | Start the safe background monitor | Sign-in required / POST |
-| `/api/monitor/stop` | Stop the monitor | Sign-in required / POST |
-| `/api/monitor/demo` | Analyze an isolated safe simulation with a run ID and response | Sign-in required / POST |
-| `/api/runs/dataset` | Upload and evaluate labeled telemetry CSV | Sign-in required / POST |
-| `/api/runs` | Recent account-owned runs | Sign-in required |
-| `/api/runs/<id>` | Full run evidence | Run owner |
-| `/api/runs/<id>/report.csv` | Download run / incident CSV | Run owner |
-| `/api/alerts/<id>/report.csv` | Download incident CSV | Sign-in required; run incidents restricted to owner |
-| `/api/notifications` | Nonsecret notification configuration status | Sign-in required |
-| `/api/events` | Recent monitoring events | Sign-in required |
-| `/api/alerts` | Recent alerts | Sign-in required |
-
-The monitor uses a hybrid TCN + XGBoost classifier. A causal TCN summarizes eight consecutive telemetry windows, and XGBoost combines that temporal representation with the latest eleven engineered measurements. Training reports an XGBoost-only ablation beside the hybrid. The checked-in model is trained on safe synthetic sequences and must be validated on representative labeled endpoint data before production use.
-
-The “canary accessed” signal means a canary was observably changed or removed during a polling window. Pure read access is not claimed because portable snapshot polling cannot reliably observe it; a production deployment would require file-system audit telemetry or an endpoint agent.
-
-Retrain the model using the NumPy and XGBoost dependencies in `requirements.txt`:
+For a new installation, install dependencies and create a secret first:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\train_model.py --samples 6000 --seed 20261014
+python -m pip install -r requirements.txt
+python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-The command writes `app/artifacts/behavioral_model.json` and reports held-out accuracy, precision, recall, and F1. Use `--samples` and `--seed` to control the reproducible training run.
+Copy `.env.example` to `.env`, paste the generated value into `SECRET_KEY`, then start the app. The existing local `.env` is ignored by Git and must never be committed or shared.
 
-For a deployed environment, configure a strong `SECRET_KEY`, HTTPS, secure cookies, database migrations, rate limiting, per-user event ownership, and a production WSGI server.
+## Use the dashboard
 
-## Automated response
+- **Run the SILRAD benchmark:** prepare the dataset once using the command below, then select **Run SILRAD held-out test**. The app trains on the publisher's training split and reports results on its separate test split.
+- **Monitor a directory:** set `MONITOR_TARGET_PATH` in `.env` to a directory you control, restart the app, then choose **Start monitoring**. The default is the empty `instance/monitor_target` folder. Start with a disposable test folder. Live alerts use a rolling 30-second window: at least 10 distinct deletions, 20 modifications, or 30 distinct changed files with at least 10 modified or deleted. Each alert includes the observed counts. The score is a heuristic activity indicator, not a probability. Alerts have a 60-second cooldown; rule-based alerts never auto-quarantine files.
+- **Review results:** the dashboard refreshes events, alerts, and runs automatically. SILRAD predictions can be downloaded as a CSV. Dataset analysis never moves local files.
+- **Laptop transfer:** follow [TWO_LAPTOP_SETUP.md](TWO_LAPTOP_SETUP.md) to receive CSVs over SFTP. The receiver validates the transfer manifest and checksum before analysis.
+- **VM folder monitoring:** follow [REMOTE_AGENT_SETUP.md](REMOTE_AGENT_SETUP.md) to forward safe file activity summaries from an HTTPS-connected Windows VM.
 
-High-risk file-activity alerts automatically move affected, existing regular files
-from the decoy directory into `instance/quarantine/<alert-id>/<original-relative-path>`.
-Missing/deleted files and failed moves are recorded. Medium-risk background-monitor
-alerts do not move files; explicit simulation/dataset runs use the model threshold
-for their generated test files. The dashboard and `/api/alerts` expose response completion, per-file results,
-and notification delivery status. The new audit table is created on startup without
-altering existing alert records. Restart the application after updating the code.
+### SILRAD Sysmon benchmark
 
-The default scope remains the synthetic decoy directory. Quarantine is a file move,
-not process termination, access revocation, recovery, or a guarantee of containment
-against an active attacker. Keep the quarantine directory private and on the same
-filesystem; cross-filesystem moves fail safely. Review audit results before manually
-restoring any file. Never overwrite an existing original during recovery.
-
-Notifications are disabled until configured. Set environment variables before
-starting the application:
+The dashboard includes a separate **Run SILRAD held-out test** action. Prepare the local data and project-specific XGBoost model once from the published SILRAD archive:
 
 ```powershell
-$env:AUTO_QUARANTINE = "true" # set false for alert-only operation
-$env:RESPONSE_WEBHOOK_URL = "https://your-service.example/alerts"
-$env:RESPONSE_EMAIL_TO = "analyst@example.com"
-$env:RESPONSE_EMAIL_FROM = "ransomshield@example.com"
-$env:SMTP_HOST = "smtp.example.com"
-$env:SMTP_PORT = "587"
-$env:SMTP_USERNAME = "your-smtp-user"
-$env:SMTP_PASSWORD = "your-smtp-secret"
+.\.venv\Scripts\python.exe scripts\setup_silrad.py
 ```
 
-Either channel can be configured independently. SMTP requires STARTTLS. Outbound
-requests have five-second socket timeouts; delivery failures are recorded without
-undoing quarantine. Notifications run in the monitoring worker and may delay its
-next poll. There is no automatic retry; an incomplete audit needs manual review.
-Webhook payloads contain the alert and file results, including local paths, so use
-a trusted endpoint. Secrets are read from the environment and are not displayed.
+This downloads the publisher's separate training and test CSVs into the ignored `instance/silrad/` folder, trains only on `fasttext-trainmodel.csv`, and evaluates only `fasttext-testmodel.csv`. The held-out test split contains 156,841 labeled Sysmon events; the training split contains 39,999. The app provides an aggregate report and a separate row-prediction CSV without copying raw command lines or other Sysmon text into the database. Results are a dataset benchmark, not a live-computer diagnosis. The model is this project's hashed-text XGBoost adaptation; it does not reproduce the paper's reported algorithm, and its 0.60 threshold is fixed rather than calibrated on the test split.
 
-## External dataset evaluation
+The current run at the fixed 0.60 threshold produced 10.17% recall (1,986 true positives, 17,543 false negatives) on the publisher's held-out split. That is poor detection coverage, so this model is not suitable for live alerts. The source repository does not declare a redistribution license. The setup script keeps the data and derived model local under `instance/`; do not redistribute them without checking the publisher's terms. Source: [SILRAD dataset](https://github.com/JamilIsp/SILRAD-dataset).
 
-```powershell
-.\.venv\Scripts\python.exe scripts\evaluate_external.py external.csv --dataset-name "Independent telemetry" --source "https://publisher.example/dataset" --output instance\external_evaluation.json
+### Dataset formats
+
+The dashboard benchmark uses SILRAD Sysmon event CSVs only. The setup script downloads the publisher's separate train and test splits; arbitrary CSV uploads are not part of this benchmark workflow. Other legacy CSV API routes remain for compatibility but are not shown in the dashboard.
+
+The bundled MLRan dataset is published research data. Its scores are specific to that dataset and inherit its sampling limitations. The TCN telemetry artifact is synthetic-trained and used only for offline CSV runs. No live endpoint detector here has been prospectively validated against real ransomware; burst alerts can still have false positives and misses.
+
+## Email notifications
+
+Email is configured per installation in the local `.env` file. The repository does not include anyone's sender address, recipient, or password. Copy `.env.example` to `.env`, enter values for your email provider, and restart the Flask app and SFTP receiver after editing it.
+
+For Gmail, set values like these in your local `.env`:
+
+```dotenv
+APP_NAME=RansomShield
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURITY=starttls
+SMTP_USERNAME=your-gmail-address
+SMTP_PASSWORD='your-16-character-app-password'
+RESPONSE_EMAIL_FROM='RansomShield <your-gmail-address>'
+RESPONSE_EMAIL_TO=recipient@example.com
 ```
 
-The evaluator loads the existing model without training or changing its weights.
-Provide CSV columns `trace_id`, `window_index`, `label`, followed by all eleven
-`FEATURE_NAMES` in `app/detector.py`. Labels are `0` (benign) or `1` (ransomware).
-Each row must describe a **two-second window**, matching the training data; window
-indices are consecutive integers within each independent host/run trace. The
-evaluator sorts windows, rejects duplicate or missing indices, and clears temporal
-history between traces. Each label describes its window, not an entire trace.
+Use a Google App Password, not your Google account password. Email alerts are sent as readable plain text and distinguish offline CSV results from live folder activity. Dataset notices state that flagged records do not indicate an infected computer. A `sent` status means Gmail accepted the message; it does not prove inbox delivery or reading. Automated tests mock SMTP and do not send email.
 
-Counts must use the monitor's snapshot semantics (created, modified, and deleted
-paths per window). `decoy_files_touched` is their sum, `directories_touched` counts
-top-level directories, and `operation_rate` is total changes divided by two seconds.
-CPU and memory are percentages, process count is a count, and canary indicators
-mean observed modification/removal rather than read access. Count fields are not
-interchangeable with whole-run API call frequencies. Missing features, negative
-values, NaN, and infinity are rejected rather than silently imputed. An optional
-`--mapping columns.json` maps canonical column names to source column names, e.g.
-`{"created_count": "files_created"}`; it does not change measurement semantics.
+For reusable per-installation email settings and the Firebase/hosting workflow, see [INTEGRATIONS_SETUP.md](INTEGRATIONS_SETUP.md). Firebase Authentication is optional; enable it only after entering that installation's web config and configuring trusted Firebase Admin credentials.
 
-The JSON report includes accuracy, precision, recall, F1, false-positive rate,
-confusion counts, per-window predictions, dataset/model SHA-256 hashes, provenance,
-and the decision threshold (artifact default, optionally set with `--threshold`).
-Undefined metrics are `null`. Choose the threshold before external evaluation;
-do not tune it on the external test labels. Correlated windows do not constitute
-independent experimental samples.
+If you are new to Firebase, follow the [click-by-click Firebase setup guide](FIREBASE_SETUP_WALKTHROUGH.md). It starts with a no-billing staging project and Authentication only.
 
-[MLRan](https://github.com/faithfulco/mlran) publishes processed behavioral features
-and Cuckoo parsing scripts. Its processed feature matrix is not a drop-in replacement
-for this detector's ordered telemetry. A reviewed conversion from compatible source
-traces is needed; absent resource/canary measurements cannot be assumed to be zero.
-No published dataset has been evaluated by this change, and the existing accuracy
-numbers remain synthetic results. This command supplies the evaluation pipeline,
-not evidence of external generalization.
+## Quarantine policy
 
-Run the automated integration and validation tests with:
+`QUARANTINE_MODE=dry-run` is the default. Dataset alerts never move local files. Live file-burst rules are audit-only and do not auto-quarantine because file-change volume alone does not establish malware.
+
+## Install as a PWA
+
+Run locally at `http://127.0.0.1:5000` or serve over HTTPS, then use the browser's **Install RansomShield** prompt or its install menu. The service worker caches static interface assets and an offline page. It never caches the authenticated dashboard, API responses, uploaded datasets, or incident evidence. Offline mode does not expose cached account data.
+
+## Test the application
+
+Run the automated suite from the project directory:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-## Generate the project presentation
+The suite checks authentication, schema validation, model inference, incident ownership, notification outcomes with mocks, quarantine and restore behavior, SFTP integrity handling, and PWA routes. It does not test real Gmail delivery or a physical two-laptop transfer.
 
-```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements-presentation.txt
-.\.venv\Scripts\python.exe scripts\generate_project_ppt.py
-```
+To check Gmail delivery manually, run the SILRAD held-out evaluation from the signed-in dashboard. If it creates a suspicious incident, check the incident's email status and then the configured inbox. A successful SMTP status is not a delivery receipt.
 
-This creates `RansomShield_Current_Implementation.pptx` with editable PowerPoint shapes and the current verified project status.
+## Project folders
 
-## Included published dataset: ready without uploads
+- `app/` Flask routes, models, dashboard, detector, PWA assets, and response logic
+- `app/artifacts/` frozen model artifacts
+- `data/mlran/` published MLRan data and provenance notes
+- `instance/` local database, monitor target, SILRAD files/model, received data, quarantine, and run reports; ignored by Git
+- `scripts/` training, evaluation, and SFTP sender/receiver utilities
+- `tests/` isolated automated tests
 
-The dashboard now offers **Run included MLRan dataset** and **Demo sender ? receiver locally**. Both use the included cleaned held-out MLRan CSV and automatically create run/incident evidence, placeholder quarantine and reports. The local transfer button does not use Wi-Fi or SSH.
+## Known limits
 
-MLRan training: 2,300 cleaned training samples and 324 held-out samples, with no sample-ID or exact selected-feature-vector overlap. Accuracy 92.90%, precision 85.29%, recall 91.58%, F1 88.32%. The model uses 202 binary API/file/directory/registry/drop indicators; labels, IDs, signatures, strings and system fingerprints are excluded. See `data/mlran/training_report.json` for counts, hashes and limitations.
-
-This is **XGBoost on published tabular MLRan data**, not TCN validation. The existing synthetic TCN + XGBoost model still handles temporal telemetry. Publisher feature selection and collection bias remain limitations.
-
-Reproduce: `.\.venv\Scripts\python.exe scripts/train_mlran.py`. The published-data download is `data/mlran/heldout.csv`; it can also be sent through the existing sender script. Actual two-device transfer and external notification delivery remain unverified.
+This is a research prototype. Live alerts are conservative rolling file-change rules and can still produce false positives or miss activity. Filesystem monitoring does not provide process attribution or content-based encryption confirmation. No live endpoint malware tests or physical laptop transfer have been verified. Do not rely on it to protect production data or replace endpoint security software.

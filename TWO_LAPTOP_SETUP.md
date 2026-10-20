@@ -5,9 +5,9 @@ SMTP update: set email credentials in the project-root `.env` on Laptop 2
 Restart both after editing. No SMTP keys are needed on Laptop 1.
 
 Laptop 1 sends **CSV records only** through SSH/SFTP over your private Wi-Fi.
-Laptop 2 validates the checksum, runs the existing TCN + XGBoost model, records
-metrics and an incident when appropriate, quarantines generated test placeholders,
-attempts configured notifications, and updates its dashboard automatically.
+Laptop 2 validates the checksum, selects the compatible model, records metrics
+and an incident when appropriate, attempts configured notifications, and updates
+its dashboard automatically. Dataset evaluation never changes local files.
 
 ## What is ready
 
@@ -65,7 +65,7 @@ Do not disable host-key verification. The sender uses `StrictHostKeyChecking=yes
 
 ## 2. Laptop 2: start dashboard and receiver
 
-Open PowerShell in `D:\Projects\ransoware`. Start the existing app:
+Open PowerShell in the project root (the folder containing `run.py`). Start the app:
 
 ```powershell
 .\.venv\Scripts\python.exe run.py
@@ -82,34 +82,35 @@ In a **second PowerShell terminal**, in the same project folder, run:
 ```
 
 Replace the email with the account you just used. The receiver creates and prints
-the inbox path, normally `D:/Projects/ransoware/instance/inbox`. Keep both terminals
+the inbox path under this installation's `instance/inbox` folder. Keep both terminals
 open. Configure SMTP/webhook environment variables in **both terminals** before
 starting if you want actual notification attempts; otherwise channels are disabled.
 
 ## 3. Laptop 1: send a safe dataset
 
-Copy `scripts/send_dataset.py` and `data/safe_demo.csv` to Laptop 1, or extract
-`Laptop1_Sender.zip`. Install Python 3.9+ and Windows OpenSSH Client if needed.
+Copy `scripts/send_dataset.py` and `data/mlran/heldout.csv` to Laptop 1. Install
+Python 3.9+ and Windows OpenSSH Client if needed. There is no sender ZIP bundle;
+the PWA is installed from the browser, while this optional sender script is run
+directly when a second device is available.
 Open PowerShell in the extracted folder:
 
 ```powershell
-python send_dataset.py safe_demo.csv --to WINDOWS_USER@LAPTOP2_IP --inbox "D:/Projects/ransoware/instance/inbox" --dataset-name "Safe synthetic demo" --source "Locally generated synthetic records"
+python send_dataset.py heldout.csv --to WINDOWS_USER@LAPTOP2_IP --inbox "LAPTOP2_INSTANCE_INBOX_PATH" --dataset-name "MLRan held-out samples" --source "Published MLRan dataset; see upstream source in data/mlran/README.md"
 ```
 
 Replace the Windows username, Wi-Fi IP and inbox path with Laptop 2's values.
 The sender waits up to 120 seconds for a result. It prints the run ID, prediction,
-risk, evaluation metrics, quarantined file count and notification status.
+risk, evaluation metrics and notification status. Dataset evaluation never quarantines local files.
 
-The sample contains 8 benign and 8 suspicious windows. It is a workflow fixture,
-not evidence of published-dataset accuracy. MLRan CSVs now use the separately trained published-data XGBoost model automatically. RanDe-W11 remains unsupported.
+`heldout.csv` is the published MLRan held-out dataset, not a generated demo fixture. It is analyzed by the separate tabular XGBoost model; the result describes those published records and does not establish endpoint protection performance. Compatible telemetry CSVs use the experimental synthetic-trained TCN + XGBoost model. RanDe-W11 remains unsupported.
 
 ## 4. Laptop 2: inspect the result
 
 Stay signed in with the receiver's RansomShield email. Within the dashboard's
 next refresh, the transferred run appears with checksum verification, prediction,
-accuracy/precision/recall/F1, incident details, quarantine results, and CSV report.
-Actual file movement affects **only generated test placeholders on Laptop 2**;
-it never affects files on Laptop 1 or paths supplied inside the CSV.
+accuracy/precision/recall/F1, incident details, notification status, and CSV report.
+Uploaded datasets are evaluated as records only. CSV paths are not trusted and
+are never used to select local files for quarantine.
 
 ## Troubleshooting
 
@@ -134,4 +135,4 @@ remain running to process new uploads.
 
 ## No second laptop available
 
-Use **Run included MLRan dataset** or **Demo sender ? receiver locally** on the dashboard. Neither requires a dataset upload, credentials, or another device. The second option verifies local checksum/receiver processing only, not SSH or Wi-Fi. Published samples are analyzed with XGBoost; temporal simulations use TCN + XGBoost.
+Use **Run included MLRan dataset** on the dashboard to evaluate the published samples without a second device. This does not test SSH or Wi-Fi. Published samples are evaluated with XGBoost; telemetry CSVs use the experimental TCN + XGBoost model.

@@ -1,14 +1,16 @@
 import csv
 import io
 import json
-import hashlib
-from uuid import uuid4
+import hmac
+import re
+from datetime import datetime, timedelta, timezone
+from uuid import UUID
 from pathlib import Path
 from flask import Blueprint, current_app, jsonify, request, Response, abort, send_file
 from flask_login import login_required, current_user
 from werkzeug.datastructures import FileStorage
 
-from .extensions import db
+from .extensions import csrf, db
 from .models import Alert, MonitoringEvent, AnalysisRun, QuarantineItem
 from .runs import start_run, execute
 
@@ -16,21 +18,112 @@ from .runs import start_run, execute
 api = Blueprint("api", __name__, url_prefix="/api")
 
 
+@api.post("/agent/events")
+@csrf.exempt
+def agent_event():
+    """Accept bounded file activity summaries from a trusted endpoint agent."""
+    token = current_app.config.get("AGENT_API_TOKEN", "")
+    supplied = request.headers.get("Authorization", "")
+    supplied = supplied.removeprefix("Bearer ")
+    if not token or not hmac.compare_digest(supplied, token):
+        return jsonify(ok=False, message="Agent authentication failed."), 401
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify(ok=False, message="Expected a JSON event."), 400
+    try:
+        event_id = str(UUID(str(body.get("event_id", ""))))
+    except (ValueError, TypeError, AttributeError):
+        return jsonify(ok=False, message="event_id must be a UUID."), 400
+    agent = str(body.get("agent", ""))[:64]
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", agent):
+        return jsonify(ok=False, message="agent must use letters, numbers, dot, dash, or underscore."), 400
+    operation = body.get("operation")
+    if operation not in {"created", "modified", "deleted"}:
+        return jsonify(ok=False, message="Unsupported file operation."), 400
+    relative_path = str(body.get("path", "")).replace("\\", "/")
+    if (not relative_path or len(relative_path) > 400 or relative_path.startswith("/")
+            or any(part in {"", ".", ".."} for part in relative_path.split("/"))):
+        return jsonify(ok=False, message="path must be a safe relative path."), 400
+    # event_id lives on MonitoringEvent; query explicitly to make retries idempotent.
+    existing = MonitoringEvent.query.filter_by(event_id=event_id).first()
+    if existing:
+        return jsonify(ok=True, duplicate=True), 202
+    db.session.add(MonitoringEvent(
+        event_id=event_id, event_type=f"file_{operation}", severity="info",
+        details=f"Agent {agent}: {operation} {relative_path}"[:500], risk_score=0, source="agent",
+    ))
+    db.session.commit()
+    burst_alert = evaluate_agent_window(agent)
+    return jsonify(ok=True, duplicate=False, evaluated=True, alert_created=burst_alert), 202
+
+
+def evaluate_agent_window(agent: str) -> bool:
+    """Evaluate persisted agent events so separate cloud instances share state."""
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=30)
+    prefix = f"Agent {agent}: %"
+    events = (MonitoringEvent.query.filter(
+        MonitoringEvent.source == "agent",
+        MonitoringEvent.created_at >= cutoff,
+        MonitoringEvent.details.like(prefix),
+    ).all())
+    paths = {"created": set(), "modified": set(), "deleted": set()}
+    for event in events:
+        operation = event.event_type.removeprefix("file_")
+        if operation in paths:
+            prefix = f"Agent {agent}: {operation} "
+            paths[operation].add(event.details.removeprefix(prefix))
+    created, modified, deleted = (paths[key] for key in ("created", "modified", "deleted"))
+    total = len(created | modified | deleted)
+    destructive = len(modified | deleted)
+    burst = (len(deleted) >= 10 or len(modified) >= 20
+             or (total >= 30 and destructive >= 10))
+    if not burst:
+        return False
+    last_alert = Alert.query.filter_by(model_version="endpoint-agent-burst-v1").filter(
+        Alert.created_at >= now - timedelta(seconds=60)
+    ).first()
+    if last_alert:
+        return False
+    risk = min(100, round(100 * max(len(deleted) / 10, len(modified) / 20, total / 30)))
+    severe = (len(deleted) >= 20 or len(modified) >= 40
+              or (total >= 60 and destructive >= 20))
+    monitor = current_app.extensions["monitoring_service"]
+    monitor._persist_alert(
+        "Remote endpoint file-change burst",
+        (f"Agent {agent} reported {total} distinct file changes in 30 seconds "
+         f"({len(created)} created, {len(modified)} modified, {len(deleted)} deleted). "
+         "Review this activity; this rule is an anomaly signal, not a malware verdict."),
+        "high" if severe else "medium", max(risk, 60), created | modified | deleted,
+        model_version="endpoint-agent-burst-v1",
+    )
+    return True
+
+
 @api.errorhandler(413)
 def upload_too_large(error):
     return jsonify(ok=False, message="Upload exceeds the 5 MB request limit."), 413
-
-
-@api.get("/datasets/sample.csv")
-@login_required
-def sample_dataset():
-    return send_file(Path(current_app.root_path).parent / "data/safe_demo.csv", as_attachment=True, download_name="safe_demo.csv")
 
 
 @api.get("/datasets/mlran.csv")
 @login_required
 def mlran_dataset():
     return send_file(Path(current_app.root_path).parent / "data/mlran/heldout.csv", as_attachment=True, download_name="mlran_heldout.csv")
+
+
+@api.get("/datasets/telemetry-template.csv")
+@login_required
+def telemetry_template():
+    from .detector import FEATURE_NAMES
+
+    stream = io.StringIO(newline="")
+    csv.writer(stream, lineterminator="\n").writerow(
+        ["trace_id", "window_index", "label", *FEATURE_NAMES]
+    )
+    return Response(stream.getvalue(), mimetype="text/csv", headers={
+        "Content-Disposition": 'attachment; filename="ransomshield-telemetry-template.csv"',
+        "Cache-Control": "no-store",
+    })
 
 
 @api.post("/runs/mlran")
@@ -44,25 +137,41 @@ def run_mlran():
     return run_response(run)
 
 
-@api.post("/runs/local-transfer")
+@api.post("/runs/silrad")
 @login_required
-def local_transfer_demo():
-    """Exercise sender snapshot -> inbox -> receiver using local files, not Wi-Fi."""
-    from .mlran import SOURCE
-    from .transfer import receive_one
-    payload = (Path(current_app.root_path).parent / "data/mlran/heldout.csv").read_bytes()
-    transfer_id = str(uuid4())
-    inbox = Path(current_app.config["RUNS_PATH"]) / "local_transfer_inbox"
-    inbox.mkdir(parents=True, exist_ok=True)
-    (inbox / f"{transfer_id}.csv").write_bytes(payload)
-    manifest = {"version": 1, "sha256": hashlib.sha256(payload).hexdigest(), "size_bytes": len(payload),
-                "dataset_name": "MLRan — local sender/receiver demo", "source": SOURCE}
-    part = inbox / f"{transfer_id}.ready.json.part"
-    part.write_text(json.dumps(manifest), encoding="utf-8")
-    ready = inbox / f"{transfer_id}.ready.json"
-    part.replace(ready)
-    run = receive_one(current_app, inbox, current_user.id, ready, transport="local_demo (no network transfer)")
+def run_silrad():
+    """Evaluate only the publisher's held-out SILRAD split for this run."""
+    from .silrad import SOURCE
+    dataset_dir = Path(current_app.instance_path) / "silrad"
+    model_path = dataset_dir / "metadata.json"
+    test_path = dataset_dir / "fasttext-testmodel.csv"
+    if not model_path.is_file() or not test_path.is_file():
+        return jsonify(ok=False, message=(
+            "SILRAD is not prepared yet. In the project folder, run "
+            ".venv\\Scripts\\python.exe scripts\\setup_silrad.py"
+        )), 409
+    run = start_run(current_app, current_user.id, "silrad")
+    with test_path.open("rb") as stream:
+        run = execute(current_app, run, FileStorage(stream=stream, filename="fasttext-testmodel.csv"),
+                      "SILRAD publisher-provided held-out test split", SOURCE)
     return run_response(run)
+
+
+@api.get("/silrad/status")
+@login_required
+def silrad_status():
+    metadata_path = Path(current_app.instance_path) / "silrad" / "metadata.json"
+    if not metadata_path.is_file():
+        return jsonify(ready=False, setup_command=".venv\\Scripts\\python.exe scripts\\setup_silrad.py")
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    evaluation = metadata.get("heldout_evaluation", {})
+    return jsonify(ready=True, model_name=metadata.get("display_name"),
+                   training_rows=metadata.get("training_rows"),
+                   test_rows=evaluation.get("windows"), threshold=evaluation.get("threshold"),
+                   metrics=evaluation.get("metrics", {}),
+                   confusion_matrix=evaluation.get("confusion_matrix", {}),
+                   class_counts=evaluation.get("class_counts", {}),
+                   limitations=metadata.get("limitations", []))
 
 
 def get_monitor():
@@ -74,15 +183,28 @@ def get_monitor():
 def monitor_status():
     monitor = get_monitor()
     public_model_path = Path(current_app.root_path) / "artifacts/mlran/model.json"
+    telemetry_model_path = Path(current_app.root_path) / "artifacts/behavioral_model.json"
     public_model = json.loads(public_model_path.read_text(encoding="utf-8")) if public_model_path.exists() else {}
+    telemetry_model = json.loads(telemetry_model_path.read_text(encoding="utf-8")) if telemetry_model_path.exists() else {}
     return jsonify(
         {
             "status": monitor.status(),
             "event_count": MonitoringEvent.query.count(),
             "alert_count": visible_alerts().filter_by(acknowledged=False).count(),
-            "model": ({key: monitor.detector.model.get(key) for key in
-                       ("display_name", "trained_at", "training", "metrics", "decision_threshold")}
-                      if monitor.detector.is_ready else {"error": "Model unavailable"}),
+            "model": {key: telemetry_model.get(key) for key in
+                      ("display_name", "trained_at", "training", "metrics", "decision_threshold")},
+            "live_policy": {
+                "name": "Rolling file-burst rules",
+                "window_seconds": 30,
+                "alert_thresholds": {
+                    "deleted_files": 10,
+                    "modified_files": 20,
+                    "mixed_changes": 30,
+                    "mixed_change_minimum_modified_or_deleted": 10,
+                },
+                "score_type": "heuristic activity score; not a probability",
+                "automatic_quarantine": False,
+            },
             "published_model": {key: public_model.get(key) for key in ("display_name", "trained_at", "training", "metrics", "limitations")},
         }
     )
@@ -114,13 +236,6 @@ def stop_monitor():
             "status": monitor.status(),
         }
     )
-
-
-@api.post("/monitor/demo")
-@login_required
-def run_safe_demo():
-    run = execute(current_app, start_run(current_app, current_user.id, "simulation"))
-    return run_response(run)
 
 
 def run_response(run):
@@ -196,6 +311,19 @@ def run_report(run_id):
     for item in (response or {}).get("files", []):
         rows.append([item["source"], item["status"], item.get("destination", ""), item.get("error", "")])
     return csv_download(rows, f"ransomshield-{run.id}.csv")
+
+
+@api.get("/runs/<run_id>/predictions.csv")
+@login_required
+def run_predictions(run_id):
+    run = owned_run(run_id)
+    if run.kind != "silrad":
+        abort(404)
+    path = Path(current_app.config["RUNS_PATH"]) / run.id / "predictions.csv"
+    if not path.is_file():
+        abort(404)
+    return send_file(path, as_attachment=True, download_name=f"ransomshield-silrad-{run.id}-predictions.csv",
+                     mimetype="text/csv", max_age=0)
 
 
 @api.get("/alerts/<int:alert_id>/report.csv")

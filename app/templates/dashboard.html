@@ -36,12 +36,11 @@
             <div>
                 <span class="account-chip"><i class="bi bi-shield-check"></i>Authenticated workspace</span>
                 <h1 class="dashboard-heading mt-3 mb-2">Welcome, {{ current_user.full_name }}.</h1>
-                <p class="muted mb-0">Monitor a synthetic decoy server, detect canary interaction, and review behavioral risk evidence.</p>
+                <p class="muted mb-0">Run the SILRAD benchmark, monitor a configured directory, and review results.</p>
             </div>
             <div class="control-bar">
                 <button class="btn-brand" type="button" @click="startMonitor" :disabled="busy || status.running"><i class="bi bi-play-fill me-2"></i>Start monitoring</button>
                 <button class="btn-outline-custom" type="button" @click="stopMonitor" :disabled="busy || !status.running"><i class="bi bi-stop-fill me-2"></i>Stop</button>
-                <button class="btn-outline-custom" type="button" @click="runDemo" :disabled="busy"><i class="bi bi-beaker me-2"></i>Simulate activity</button>
             </div>
         </div>
 
@@ -51,45 +50,55 @@
             <button class="btn p-0 border-0 ms-auto" type="button" @click="feedback=''" aria-label="Dismiss"><i class="bi bi-x-lg"></i></button>
         </div>
 
-        <section class="panel p-4 mb-4" aria-labelledby="dataset-heading">
-            <h2 class="h4">Published MLRan dataset — ready to run</h2>
-            <p class="small muted">The dataset and trained XGBoost model are included. No dataset upload or second laptop is needed for these local runs. The temporal TCN + XGBoost model remains available for telemetry and simulations.</p>
-            <div class="d-flex flex-wrap gap-2 mb-3">
-                <button type="button" class="btn-brand" @click="performAction('/api/runs/mlran')" :disabled="busy">Run included MLRan dataset</button>
-                <button type="button" class="btn-outline-custom" @click="performAction('/api/runs/local-transfer')" :disabled="busy">Demo sender → receiver locally</button>
-                <a class="btn-outline-custom" href="/api/datasets/mlran.csv">Download MLRan test CSV</a>
+        <details class="panel p-4 mb-4" open>
+            <summary class="h4 mb-0">Start here: test and use RansomShield</summary>
+            <div class="row g-3 mt-1">
+                <div class="col-md-6">
+                    <h3 class="h6">1. Check dataset analysis</h3>
+                    <p class="small muted mb-0">Select <strong>Run SILRAD held-out test</strong> below to evaluate the published Sysmon events. The result describes dataset events; it does not say whether this computer is infected.</p>
+                </div>
+                <div class="col-md-6">
+                    <h3 class="h6">2. Review the benchmark result</h3>
+                    <p class="small muted mb-0">The dashboard shows the held-out test metrics and warns when recall is low. Download the row predictions for the event-by-event results.</p>
+                </div>
+                <div class="col-md-6">
+                    <h3 class="h6">3. Monitor a folder you control</h3>
+                    <p class="small muted mb-0">Use <strong>Start monitoring</strong> above to watch the configured folder shown in Filesystem activity. Try a disposable folder first. Alerts use file-change burst rules, not malware proof; stop monitoring when you finish.</p>
+                </div>
+                <div class="col-md-6">
+                    <h3 class="h6">4. Review and export</h3>
+                    <p class="small muted mb-0">Runs and alerts appear below. Select <strong>Download CSV report</strong> on a run to save its results. Only alerts and runs belonging to this account are shown.</p>
+                </div>
             </div>
-            <p class="small muted">Local transfer demo copies records through the receiver workflow on this laptop. It does not test Wi-Fi or SSH. Suspicious predictions quarantine generated placeholders only.</p>
-            <details class="mb-3"><summary>Published-data training results</summary>
-                <p class="small mt-2"><span x-text="publishedModel.display_name || 'Model unavailable'"></span> · Training samples: <span x-text="publishedModel.training?.training_samples ?? '—'"></span> · Held-out samples: <span x-text="publishedModel.training?.test_samples ?? '—'"></span></p>
-                <p class="small">Accuracy: <span x-text="metric(publishedModel.metrics?.accuracy)"></span> · Precision: <span x-text="metric(publishedModel.metrics?.precision)"></span> · Recall: <span x-text="metric(publishedModel.metrics?.recall)"></span> · F1: <span x-text="metric(publishedModel.metrics?.f1)"></span></p>
-                <p class="small muted" x-text="(publishedModel.limitations || []).join(' ')"></p>
+        </details>
+
+        <section class="panel p-4 mb-4" aria-labelledby="silrad-heading">
+            <h2 id="silrad-heading" class="h4">SILRAD Sysmon benchmark</h2>
+            <p class="small muted">RansomShield trains on SILRAD’s training split and evaluates its separate held-out test split. It does not train or evaluate on the same rows.</p>
+            <div class="d-flex flex-wrap align-items-center gap-3">
+                <button type="button" class="btn-brand" @click="performAction('/api/runs/silrad')" :disabled="busy || !silrad.ready">Run SILRAD held-out test</button>
+                <span class="small muted" x-show="!silrad.ready">First, prepare the local dataset once with the command below.</span>
+            </div>
+            <div class="small mt-3" x-show="!silrad.ready">
+                <p class="mb-1">SILRAD data is not prepared on this computer yet. Run this in PowerShell from the project folder:</p>
+                <code x-text="silrad.setup_command || '.venv\\Scripts\\python.exe scripts\\setup_silrad.py'"></code>
+            </div>
+            <div class="small mt-3" x-show="silrad.ready">
+                <p class="mb-1">Prepared locally · <span x-text="silrad.training_rows"></span> training events · <span x-text="silrad.test_rows"></span> held-out events · threshold <span x-text="silrad.threshold"></span></p>
+                <p class="mb-0">Current held-out recall: <strong x-text="metric(silrad.metrics?.recall)"></strong> · false negatives: <strong x-text="silrad.confusion_matrix?.fn"></strong></p>
+                <p class="text-danger mt-2 mb-0" x-show="silrad.metrics?.recall < 0.5">This model misses many ransomware-labeled events. Use it for this dataset experiment only; it is not connected to live monitoring.</p>
+            </div>
+            <details class="small mt-3"><summary>First-time setup</summary>
+                <p class="muted mt-2 mb-1">Open PowerShell in the RansomShield project folder and run:</p>
+                <code>.venv\Scripts\python.exe scripts\setup_silrad.py</code>
+                <p class="muted mt-2 mb-0">This downloads about 4 MB and prepares local data and a model under <code>instance\silrad</code>. The data is not uploaded to Firebase or sent anywhere.</p>
             </details>
-            <details class="mb-3"><summary>Two-laptop workflow: this dashboard is Laptop 2</summary>
-                <p class="small mt-2">Laptop 1 sends CSV records through SSH/SFTP. Keep <code>scripts/receive_dataset.py --email YOUR_ACCOUNT_EMAIL</code> running on Laptop 2. Received datasets appear here automatically as <strong>laptop_transfer</strong> runs after checksum validation.</p>
-                <p class="small muted">Use the Windows setup guide <code>TWO_LAPTOP_SETUP.md</code>. Only generated test placeholders are quarantined on Laptop 2; files on Laptop 1 are never changed.</p>
-            </details>
-            <details class="mb-3"><summary>Model training status</summary>
-                <p class="small mt-2">Trained: <span x-text="formatDate(model.trained_at)"></span> · Source: <span x-text="model.training?.source || model.error || 'Loading'"></span></p>
-                <p class="small">Training sequences: <span x-text="model.training?.training_samples ?? '—'"></span> · Held-out sequences: <span x-text="model.training?.test_samples ?? '—'"></span> · Accuracy: <span x-text="metric(model.metrics?.accuracy)"></span> · F1: <span x-text="metric(model.metrics?.f1)"></span></p>
-                <p class="small muted">These are synthetic held-out metrics. Published-dataset validation remains pending.</p>
-            </details>
-            <h2 id="dataset-heading" class="h4">Run a safe telemetry dataset</h2>
-            <p class="small"><a href="/api/datasets/sample.csv">Download safe synthetic CSV for a practice run</a></p>
-            <p class="muted small">Upload labeled two-second telemetry or published MLRan feature CSVs (maximum 5 MB / 2,000 records). The matching model is selected automatically. RanDe-W11 remains unsupported; missing features are rejected.</p>
-            <form @submit.prevent="uploadDataset" class="row g-3">
-                <div class="col-md-4"><label for="dataset-file" class="form-label">CSV dataset</label><input id="dataset-file" x-ref="datasetFile" type="file" accept=".csv" required class="form-control"></div>
-                <div class="col-md-3"><label for="dataset-name" class="form-label">Dataset name</label><input id="dataset-name" x-model="datasetName" required maxlength="200" class="form-control"></div>
-                <div class="col-md-3"><label for="dataset-source" class="form-label">Source / provenance</label><input id="dataset-source" x-model="datasetSource" required maxlength="500" class="form-control"></div>
-                <div class="col-md-2 d-flex align-items-end"><button type="submit" class="btn-brand" :disabled="busy">Analyze CSV</button></div>
-            </form>
-            <p class="small muted mt-3 mb-0">CSV data is never executed. Suspicious windows quarantine generated test placeholders only. Live notifications: email <strong x-text="notifications.email"></strong>, webhook <strong x-text="notifications.webhook"></strong>.</p>
-            <details class="small muted mt-2"><summary>Configure notifications</summary><p x-text="notifications.configuration"></p><p>Delivery is recorded per incident as sent, failed, or disabled. Sent means accepted by the mail server or webhook, not read by a recipient.</p></details>
         </section>
+
         <section class="panel p-4 mb-4" aria-labelledby="runs-heading">
             <h2 id="runs-heading" class="h4">Run history and incident reports</h2>
             <p class="muted small">Refreshes every three seconds and after every run. Risk is the highest model probability in the run.</p>
-            <p x-show="!runs.length" class="muted">No runs yet. Run a simulation or upload CSV records.</p>
+            <p x-show="!runs.length" class="muted">No runs yet. Run the SILRAD held-out benchmark above to see results here.</p>
             <template x-for="run in runs" :key="run.id">
                 <article class="py-3 border-bottom" style="overflow-wrap:anywhere">
                     <div class="d-flex flex-wrap justify-content-between gap-2"><strong x-text="run.kind + ' · ' + run.status"></strong><a :href="'/api/runs/' + run.id + '/report.csv'">Download CSV report</a></div>
@@ -98,6 +107,8 @@
                     <p class="small muted" x-show="run.result.transfer" x-text="run.result.transfer?.transport || ''"></p>
                     <p class="small">Model: <strong x-text="run.result.model_name || 'No prediction'"></strong></p>
                     <p class="my-2"><strong x-text="run.result.model_prediction || 'No prediction'"></strong> · Risk <span x-text="run.result.risk_score ?? '—'"></span>/100 · Incident <span x-text="run.incident?.id ?? 'None'"></span></p>
+                    <p class="small muted" x-show="run.result.dataset_schema === 'silrad'">SILRAD test events: <span x-text="run.result.windows"></span> · Precision: <span x-text="metric(run.result.metrics?.precision)"></span> · Recall: <span x-text="metric(run.result.metrics?.recall)"></span> · F1: <span x-text="metric(run.result.metrics?.f1)"></span> · False positives: <span x-text="run.result.confusion_matrix?.fp"></span></p>
+                    <a class="small" x-show="run.result.dataset_schema === 'silrad'" :href="'/api/runs/' + run.id + '/predictions.csv'">Download SILRAD row predictions</a>
                     <p class="small" x-show="run.result.error" x-text="run.result.error"></p>
                     <p class="small muted" x-show="run.result.observed_file_activity" x-text="'Recorded activity summary: ' + JSON.stringify(run.result.observed_file_activity || {})"></p>
                     <template x-if="run.result.metrics"><p class="small muted">Accuracy <span x-text="metric(run.result.metrics.accuracy)"></span> · Precision <span x-text="metric(run.result.metrics.precision)"></span> · Recall <span x-text="metric(run.result.metrics.recall)"></span> · F1 <span x-text="metric(run.result.metrics.f1)"></span> · <span x-text="run.result.windows"></span> <span x-text="run.result.record_unit || 'windows'"></span></p></template>
@@ -134,8 +145,9 @@
             <div class="col-sm-6 col-xl-3">
                 <article class="status-card">
                     <div class="d-flex justify-content-between"><span class="status-icon"><i class="bi bi-bell"></i></span><span class="state-badge" :class="alertCount ? '' : 'running'" x-text="alertCount ? 'Review' : 'Clear'"></span></div>
-                    <div class="metric-value mt-4" :style="status.canary_triggered ? 'color:var(--danger)' : ''" x-text="status.canary_triggered ? 'TRIGGERED' : 'Armed'"></div><span class="muted small">Canary status · <span x-text="status.canary_files"></span> files</span>
-                    <div class="small muted mt-2">Background monitor risk: <span x-text="status.last_risk_score"></span>/100</div>
+                    <div class="metric-value mt-4"><span x-text="status.last_risk_score"></span><small class="fs-6">/100</small></div><span class="muted small">Rolling file activity score</span>
+                    <div class="small muted mt-1">Rule-based indicator, not a probability</div>
+                    <div class="small muted mt-2"><span x-text="status.monitored_files || 0"></span> files currently in scope</div>
                 </article>
             </div>
         </div>
@@ -153,23 +165,23 @@
                             <article class="feed-row">
                                 <span class="feed-icon" :class="event.severity"><i class="bi" :class="event.severity === 'warning' ? 'bi-exclamation-triangle' : 'bi-folder-check'"></i></span>
                                 <div><strong class="d-block" x-text="event.event_type.replaceAll('_', ' ')"></strong><p class="muted small mb-1" x-text="event.details"></p><span class="muted" style="font-size:.72rem" x-text="formatDate(event.created_at)"></span></div>
-                                <span class="state-badge" x-text="`${event.risk_score}/100`"></span>
+                                <span class="state-badge" x-text="`activity ${event.risk_score}/100`"></span>
                             </article>
                         </template>
                     </div>
 
                     <div class="empty-state" x-show="!events.length">
-                        <div><span class="status-icon mx-auto mb-3"><i class="bi bi-inbox"></i></span><h3 class="h5">No events recorded</h3><p class="muted small mb-0">Start monitoring, then run the safe demo to generate a harmless file-activity event.</p></div>
+                        <div><span class="status-icon mx-auto mb-3"><i class="bi bi-inbox"></i></span><h3 class="h5">No events recorded</h3><p class="muted small mb-0">Set MONITOR_TARGET_PATH to the directory you want to observe, then start monitoring.</p></div>
                     </div>
                 </section>
             </div>
 
             <div class="col-lg-4">
                 <section class="panel p-4 h-100">
-                    <small class="muted">DECOY SERVER</small><h2 class="h4 mt-1">Synthetic organization data</h2>
-                    <p class="muted small">This isolated honeypot contains only dummy assets. It never scans personal files or executes malware.</p>
+                    <small class="muted">MONITORED DIRECTORY</small><h2 class="h4 mt-1">Filesystem activity</h2>
+                    <p class="muted small">Only the configured directory is observed. Live alerts use a rolling 30-second rule: 10 deletions, 20 modifications, or 30 distinct changed files with at least 10 modified or deleted. The score is an activity heuristic, not a ransomware probability.</p>
+                    <p class="muted small">A burst alert asks for review; it does not identify malware. Automatic quarantine is disabled for these rule-based alerts.</p>
                     <div class="safe-note mt-3"><i class="bi bi-folder2-open me-2" style="color:var(--accent)"></i><code style="color:var(--text)" x-text="status.target"></code></div>
-                    <div class="d-flex flex-wrap gap-2 mt-3"><template x-for="directory in status.decoy_directories" :key="directory"><span class="state-badge"><i class="bi bi-folder"></i><span x-text="directory"></span></span></template></div>
                     <hr class="my-4" style="border-color:var(--line)">
                     <div class="d-flex justify-content-between mb-3"><span class="muted small">Last file burst</span><strong class="small"><span x-text="status.last_activity?.files_touched || 0"></span> files</strong></div>
                     <div class="d-flex justify-content-between mb-3"><span class="muted small">Operation rate</span><strong class="small"><span x-text="status.last_activity?.operation_rate || 0"></span>/s</strong></div>
@@ -193,7 +205,7 @@
                         <span class="feed-icon" :class="alert.severity"><i class="bi bi-shield-exclamation"></i></span>
                         <div>
                             <strong class="d-block" x-text="alert.title"></strong>
-                            <p class="small mb-1">Incident #<span x-text="alert.id"></span> · Risk <span x-text="alert.risk_score"></span>/100 · Suspicious · <a :href="'/api/alerts/' + alert.id + '/report.csv'">Download CSV</a></p>
+                            <p class="small mb-1">Incident #<span x-text="alert.id"></span> · <span x-show="alert.model_version?.startsWith('rolling-file-burst')">Activity score <span x-text="alert.risk_score"></span>/100 · Rule-based anomaly; review required.</span><span x-show="!alert.model_version?.startsWith('rolling-file-burst')">Dataset evaluation flagged records; score <span x-text="alert.risk_score"></span>/100. This refers to the uploaded CSV, not your computer.</span> · <a :href="'/api/alerts/' + alert.id + '/report.csv'">Download CSV</a></p>
                             <p class="muted small mb-1" x-text="alert.details"></p>
                             <template x-if="alert.response">
                                 <div class="small mt-2">
@@ -214,15 +226,15 @@
                     </article>
                 </template>
             </div>
-            <div class="empty-state" x-show="!alerts.length"><div><span class="status-icon mx-auto mb-3"><i class="bi bi-shield-check"></i></span><h3 class="h5">No alerts</h3><p class="muted small mb-0">Unusual activity detected by the behavioral model will appear here.</p></div></div>
+            <div class="empty-state" x-show="!alerts.length"><div><span class="status-icon mx-auto mb-3"><i class="bi bi-shield-check"></i></span><h3 class="h5">No alerts</h3><p class="muted small mb-0">Alerts appear when the rolling file-change rules cross their configured burst thresholds.</p></div></div>
         </section>
 
         <section class="panel mt-4">
             <div class="p-4 border-bottom d-flex flex-wrap justify-content-between align-items-center gap-2" style="border-color:var(--line)!important">
-                <div><small class="muted">QUARANTINE</small><h2 class="h4 mt-1 mb-0">Contained files</h2></div>
+                <div><small class="muted">QUARANTINE HISTORY</small><h2 class="h4 mt-1 mb-0">Previously contained files</h2></div>
                 <button class="theme-toggle" type="button" @click="loadQuarantine" :disabled="busy" aria-label="Refresh quarantine"><i class="bi bi-arrow-clockwise"></i></button>
             </div>
-            <p class="px-4 pt-3 muted small mb-0">Restoring verifies the file hash, the recorded original path and the destination before moving anything back.</p>
+            <p class="px-4 pt-3 muted small mb-0">The current live-monitor and CSV workflows do not move files. If a prior authorized action created a record, restoring verifies its hash, original path and destination first.</p>
             <div class="px-4 pb-3" x-show="quarantine.length">
                 <template x-for="item in quarantine" :key="item.id">
                     <article class="feed-row">
@@ -236,7 +248,7 @@
                     </article>
                 </template>
             </div>
-            <div class="empty-state" x-show="!quarantine.length"><div><span class="status-icon mx-auto mb-3"><i class="bi bi-archive"></i></span><h3 class="h5">Nothing quarantined</h3><p class="muted small mb-0">Files moved by an authorised containment action appear here with their hashes.</p></div></div>
+            <div class="empty-state" x-show="!quarantine.length"><div><span class="status-icon mx-auto mb-3"><i class="bi bi-archive"></i></span><h3 class="h5">No quarantine records</h3><p class="muted small mb-0">Live activity and CSV evaluations are currently review-only and do not move files.</p></div></div>
         </section>
     </div>
 </main>
@@ -256,26 +268,20 @@
             alerts: [],
             runs: [],
             quarantine: [],
-            model: {},
-            publishedModel: {},
-            notifications: {email: 'loading', webhook: 'loading', configuration: ''},
-            datasetName: 'Independent telemetry',
-            datasetSource: '',
+            silrad: {ready: false, setup_command: '.venv\\Scripts\\python.exe scripts\\setup_silrad.py'},
             refreshTimer: null,
             status: {
                 running: false,
                 connection_state: 'Loading',
                 model_state: 'Loading model',
-                target: 'instance/decoy_server',
-                decoy_directories: [],
+                target: 'instance/monitor_target',
                 interval_seconds: 2,
                 cpu_percent: 0,
                 memory_percent: 0,
                 process_count: 0,
                 last_check: null,
                 last_risk_score: 0,
-                canary_triggered: false,
-                canary_files: 0,
+                monitored_files: 0,
                 last_activity: {}
             },
             init() {
@@ -300,24 +306,22 @@
             async refreshAll(showBusy = true) {
                 if (showBusy) this.busy = true;
                 try {
-                    const [summary, eventData, alertData, runData, notificationData, quarantineData] = await Promise.all([
+                    const [summary, eventData, alertData, runData, quarantineData, silradData] = await Promise.all([
                         this.fetchJson('{{ url_for("api.monitor_status") }}'),
                         this.fetchJson('{{ url_for("api.list_events", limit=12) }}'),
                         this.fetchJson('{{ url_for("api.list_alerts", limit=8) }}'),
                         this.fetchJson('/api/runs'),
-                        this.fetchJson('/api/notifications'),
-                        this.fetchJson('/api/quarantine')
+                        this.fetchJson('/api/quarantine'),
+                        this.fetchJson('/api/silrad/status')
                     ]);
                     this.status = summary.status;
-                    this.model = summary.model;
-                    this.publishedModel = summary.published_model;
                     this.eventCount = summary.event_count;
                     this.alertCount = summary.alert_count;
                     this.events = eventData.events;
                     this.alerts = alertData.alerts;
                     this.runs = runData.runs;
                     this.quarantine = quarantineData.items;
-                    this.notifications = notificationData;
+                    this.silrad = silradData;
                 } catch (error) {
                     this.showFeedback(error.message, 'error');
                 } finally {
@@ -340,23 +344,7 @@
             },
             startMonitor() { return this.performAction('{{ url_for("api.start_monitor") }}'); },
             metric(value) { return value == null ? 'undefined' : (value * 100).toFixed(2) + '%'; },
-            async uploadDataset() {
-                this.busy = true;
-                try {
-                    const body = new FormData();
-                    body.append('dataset', this.$refs.datasetFile.files[0]);
-                    body.append('dataset_name', this.datasetName);
-                    body.append('source', this.datasetSource);
-                    const data = await this.fetchJson('/api/runs/dataset', {method: 'POST', body});
-                    this.showFeedback(data.message);
-                } catch (error) { this.showFeedback(error.message, 'error'); }
-                finally { await this.refreshAll(false); this.busy = false; }
-            },
             stopMonitor() { return this.performAction('{{ url_for("api.stop_monitor") }}'); },
-            async runDemo() {
-                const result = await this.performAction('{{ url_for("api.run_safe_demo") }}');
-                if (result && result.ok) window.setTimeout(() => this.refreshAll(false), 2500);
-            },
             async acknowledgeAlert(alertId) {
                 await this.performAction(`/api/alerts/${alertId}/acknowledge`);
             },

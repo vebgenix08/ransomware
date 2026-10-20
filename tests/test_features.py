@@ -9,12 +9,18 @@ from unittest.mock import patch
 from app import create_app
 from app.detector import FEATURE_NAMES
 from app.extensions import db
-from app.models import Alert, QuarantineItem, ResponseAction, User
+from app.models import Alert, MonitoringEvent, QuarantineItem, ResponseAction, User
 from app.monitor import take_snapshot
 from app.response import respond, restore_quarantine
 from scripts.evaluate_external import evaluate
 
 MODEL = Path(__file__).resolve().parents[1] / "app/artifacts/behavioral_model.json"
+
+
+class SafeDefaultsTests(unittest.TestCase):
+    def test_automatic_quarantine_is_disabled_by_default(self):
+        app = create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite://"})
+        self.assertFalse(app.config["AUTO_QUARANTINE"])
 
 
 class ResponseTests(unittest.TestCase):
@@ -24,7 +30,8 @@ class ResponseTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.app = create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite://",
             "MONITOR_TARGET_PATH": self.root / "decoy", "QUARANTINE_PATH": self.root / "quarantine",
-            "RESPONSE_WEBHOOK_URL": "", "RESPONSE_EMAIL_TO": ""})
+            "RESPONSE_WEBHOOK_URL": "", "RESPONSE_EMAIL_TO": "", "QUARANTINE_MODE": "enabled",
+            "AUTO_QUARANTINE": True})
         self.context = self.app.app_context()
         self.context.push()
         self.addCleanup(self.context.pop)
@@ -91,6 +98,36 @@ class ResponseTests(unittest.TestCase):
             action = respond(self.app, self.alert(), self.monitor.target_path, set())
             self.assertEqual([call[0] for call in connection.method_calls], ['starttls', 'login', 'send_message'])
             self.assertEqual(action.result["notifications"]["email"], "sent")
+            message = connection.send_message.call_args.args[0]
+            self.assertIn("RansomShield notification", message.get_content())
+            self.assertIn("Synthetic test", message.get_content())
+            self.assertNotIn('"alert": {', message.get_content())
+
+    def test_dataset_email_explains_that_results_are_csv_records(self):
+        self.app.config.update(RESPONSE_EMAIL_TO="test@example.invalid", RESPONSE_EMAIL_FROM="sender@example.invalid",
+            SMTP_HOST="smtp.example.invalid", SMTP_SECURITY="starttls")
+        alert = self.alert()
+        alert.title = "Dataset run flagged samples"
+        alert.model_version = "XGBoost published MLRan"
+        alert.rule_trace = [
+            {"signal": "suspicious_windows", "value": 102},
+            {"signal": "total_samples", "value": 324},
+            {"signal": "dataset_name", "value": "Published held-out test set"},
+            {"signal": "dataset_source", "value": "Published MLRan research dataset"},
+        ]
+        db.session.commit()
+        with patch("app.response.smtplib.SMTP") as smtp:
+            action = respond(self.app, alert, self.monitor.target_path, set())
+            message = smtp.return_value.__enter__.return_value.send_message.call_args.args[0]
+        body = message.get_content()
+        self.assertIn("Offline CSV dataset evaluation", body)
+        self.assertIn("102 of 324", body)
+        self.assertIn("Published MLRan research dataset", body)
+        self.assertIn("does not mean a monitored computer is infected", body)
+        self.assertIn("No files were moved to quarantine", body)
+        self.assertNotIn('"alert": {', body)
+        self.assertIn("dataset analysis flagged records", message["Subject"])
+        self.assertEqual(action.result["notifications"]["email"], "sent")
 
     def test_incomplete_smtp_fails_without_connecting(self):
         self.app.config.update(RESPONSE_EMAIL_TO="test@example.invalid", SMTP_HOST="", RESPONSE_EMAIL_FROM="")
@@ -99,36 +136,65 @@ class ResponseTests(unittest.TestCase):
             smtp.assert_not_called()
             self.assertEqual(action.result["notifications"]["email"], "failed")
 
-    def test_monitor_response_does_not_trigger_own_deletion_alert(self):
+    def test_normal_single_file_create_modify_delete_are_events_not_alerts(self):
         self.monitor._snapshot = take_snapshot(self.monitor.target_path)
-        (self.monitor.target_path / "new.txt").write_text("test")
-        with patch.object(self.monitor.detector, "predict_probability", return_value=.95):
-            self.monitor._collect_once()
-            self.monitor._collect_once()
-        self.assertEqual(Alert.query.count(), 1)
-        self.assertEqual(ResponseAction.query.count(), 1)
-
-    def test_medium_risk_does_not_quarantine(self):
-        self.monitor._snapshot = take_snapshot(self.monitor.target_path)
-        target = self.monitor.target_path / "new.txt"
-        target.write_text("test")
-        with patch.object(self.monitor.detector, "predict_probability", return_value=.7):
-            self.monitor._collect_once()
-        self.assertTrue(target.exists())
-        self.assertEqual(Alert.query.count(), 1)
-        self.assertEqual(ResponseAction.query.count(), 1)
-        self.assertEqual(ResponseAction.query.one().result["quarantine"], "below_quarantine_threshold")
-
-    def test_real_model_demo_quarantines_and_preserves_audit(self):
-        self.monitor._snapshot = take_snapshot(self.monitor.target_path)
-        self.monitor.create_safe_demo_files("integration")
+        target = self.monitor.target_path / "ordinary.txt"
+        target.write_text("first version", encoding="utf-8")
         self.monitor._collect_once()
+        target.write_text("second version, slightly longer", encoding="utf-8")
+        self.monitor._collect_once()
+        target.unlink()
+        self.monitor._collect_once()
+        self.assertEqual(Alert.query.count(), 0)
+        self.assertEqual(ResponseAction.query.count(), 0)
+        events = MonitoringEvent.query.all()
+        self.assertEqual(len(events), 3)
+        self.assertTrue(all(event.severity == "info" for event in events))
+
+    def test_high_volume_modification_burst_alerts_without_auto_quarantine(self):
+        targets = []
+        for index in range(20):
+            target = self.monitor.target_path / f"modified-{index}.txt"
+            target.write_text("original", encoding="utf-8")
+            targets.append(target)
+        self.monitor._snapshot = take_snapshot(self.monitor.target_path)
+        for target in targets:
+            target.write_text("modified content", encoding="utf-8")
+        self.monitor._collect_once()
+
+        alert = Alert.query.one()
+        self.assertEqual(alert.title, "High-volume file-change burst")
+        self.assertEqual(alert.model_version, "rolling-file-burst-v1")
+        self.assertEqual(alert.rule_trace[-1]["value"], "rolling-file-burst-v1")
         action = ResponseAction.query.one()
         self.assertTrue(action.completed)
-        self.assertEqual(sum(item["status"] == "quarantined" for item in action.result["files"]), 27)
-        self.assertEqual(sum(item["status"] == "failed" for item in action.result["files"]), 5)
+        self.assertEqual(action.result["quarantine"], "below_quarantine_threshold")
+        self.assertTrue(all(target.exists() for target in targets))
+
+    def test_burst_alert_has_cooldown(self):
+        first_batch = []
+        for index in range(20):
+            target = self.monitor.target_path / f"first-{index}.txt"
+            target.write_text("before", encoding="utf-8")
+            first_batch.append(target)
+        self.monitor._snapshot = take_snapshot(self.monitor.target_path)
+        for target in first_batch:
+            target.write_text("after update", encoding="utf-8")
+        self.monitor._collect_once()
+
+        second_batch = []
+        for index in range(20):
+            target = self.monitor.target_path / f"second-{index}.txt"
+            target.write_text("before", encoding="utf-8")
+            second_batch.append(target)
+        self.monitor._snapshot = take_snapshot(self.monitor.target_path)
+        for target in second_batch:
+            target.write_text("after update", encoding="utf-8")
         self.monitor._collect_once()
         self.assertEqual(Alert.query.count(), 1)
+
+    def test_monitor_initialization_does_not_create_sample_content(self):
+        self.assertEqual(list(self.monitor.target_path.iterdir()), [])
 
     def test_authenticated_alert_response_and_dashboard(self):
         respond(self.app, self.alert(), self.monitor.target_path, set())
@@ -201,7 +267,8 @@ class RestoreTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.app = create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite://",
             "MONITOR_TARGET_PATH": self.root / "decoy", "QUARANTINE_PATH": self.root / "quarantine",
-            "RESPONSE_WEBHOOK_URL": "", "RESPONSE_EMAIL_TO": ""})
+            "RESPONSE_WEBHOOK_URL": "", "RESPONSE_EMAIL_TO": "", "QUARANTINE_MODE": "enabled",
+            "AUTO_QUARANTINE": True})
         self.context = self.app.app_context()
         self.context.push()
         self.addCleanup(self.context.pop)

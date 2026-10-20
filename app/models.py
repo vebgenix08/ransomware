@@ -19,6 +19,7 @@ class User(UserMixin, db.Model):
     full_name = db.Column(db.String(100), nullable=False)
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
+    firebase_uid = db.Column(db.String(128), unique=True, nullable=True, index=True)
     created_at = db.Column(
         db.DateTime(timezone=True),
         nullable=False,

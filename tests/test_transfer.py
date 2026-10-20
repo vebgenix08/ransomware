@@ -35,7 +35,7 @@ class TransferTests(unittest.TestCase):
         db.session.commit()
 
     def publish(self, payload=None, **updates):
-        payload = payload if payload is not None else (ROOT/'data/safe_demo.csv').read_bytes()
+        payload = payload if payload is not None else (ROOT/'data/mlran/heldout.csv').read_bytes()
         identifier = str(uuid4())
         (self.inbox/f'{identifier}.csv').write_bytes(payload)
         manifest = dict(version=1, sha256=hashlib.sha256(payload).hexdigest(), size_bytes=len(payload),
@@ -52,16 +52,18 @@ class TransferTests(unittest.TestCase):
         self.assertEqual(run.kind, 'laptop_transfer')
         self.assertEqual(run.result['transfer']['integrity'], 'verified')
         self.assertEqual(run.result['model_prediction'], 'suspicious')
-        self.assertEqual(run.result['metrics']['accuracy'], 1.0)
+        self.assertAlmostEqual(run.result['metrics']['accuracy'], 301 / 324)
         result = json.loads((self.inbox/f'{run.id}.result.json').read_text())
-        self.assertEqual(result['quarantined_files'], 8)
+        self.assertEqual(result['quarantined_files'], 0)
         self.assertEqual(result['dataset_sha256'], run.result['transfer']['sha256'])
         client = self.app.test_client()
         with client.session_transaction() as session:
             session['_user_id'] = str(self.owner.id)
             session['_fresh'] = True
         self.assertEqual(client.get('/api/runs').json['runs'][0]['id'], run.id)
-        self.assertEqual(client.get(result['report_path']).status_code, 200)
+        report_response = client.get(result['report_path'])
+        self.assertEqual(report_response.status_code, 200)
+        report_response.close()
 
     def test_replaying_manifest_does_not_repeat_analysis_or_notifications(self):
         path = self.publish()
@@ -107,7 +109,7 @@ class TransferTests(unittest.TestCase):
             captured.append((command, batch))
             return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
         with patch('scripts.send_dataset.transfer', side_effect=fake_transfer), patch('sys.stdout', new_callable=io.StringIO):
-            reply = send(ROOT/'data/safe_demo.csv', 'tester@192.168.1.10', 'D:/Projects/ransoware/instance/inbox', 'Fixture', 'test', wait_seconds=0)
+            reply = send(ROOT/'data/mlran/heldout.csv', 'tester@192.168.1.10', 'C:/RansomShield/instance/inbox', 'Fixture', 'test', wait_seconds=0)
         self.assertEqual(reply['status'], 'uploaded_result_pending')
         command, batch = captured[0]
         self.assertIn('-oStrictHostKeyChecking=yes', command)
@@ -125,7 +127,7 @@ class TransferTests(unittest.TestCase):
             sftp_quote('wild*.csv')
         with patch('scripts.send_dataset.transfer', return_value=subprocess.CompletedProcess([], 1, stderr='offline')):
             with self.assertRaisesRegex(RuntimeError, 'SFTP upload failed'):
-                send(ROOT/'data/safe_demo.csv', 'tester@192.168.1.10', 'inbox', 'Fixture', 'test', wait_seconds=0)
+                send(ROOT/'data/mlran/heldout.csv', 'tester@192.168.1.10', 'inbox', 'Fixture', 'test', wait_seconds=0)
 
 
 if __name__ == '__main__':

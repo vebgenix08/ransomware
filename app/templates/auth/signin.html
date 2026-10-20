@@ -20,6 +20,22 @@
             <h1 class="auth-title mb-2">Welcome back.</h1>
             <p class="muted mb-4">Sign in to access your protected project dashboard.</p>
 
+            {% if AUTH_PROVIDER == 'firebase' %}
+            <form data-firebase-form="signin" novalidate>
+                <div class="mb-3">
+                    <label class="form-label" for="firebase-email">Email address</label>
+                    <input id="firebase-email" class="form-control-custom" name="email" type="email" autocomplete="email" required placeholder="name@example.com">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="firebase-password">Password</label>
+                    <input id="firebase-password" class="form-control-custom" name="password" type="password" autocomplete="current-password" required placeholder="Enter your password">
+                </div>
+                <button class="btn-brand w-100" type="submit">Sign in</button>
+                <button class="btn-outline-custom w-100 mt-2" type="button" data-firebase-reset>Send password reset email</button>
+                <button class="btn-outline-custom w-100 mt-2 d-none" type="button" data-firebase-continue>I've verified my email — continue</button>
+                <p class="small mt-3 mb-0 muted" data-firebase-status role="status" aria-live="polite"></p>
+            </form>
+            {% else %}
             <form method="post" action="{{ url_for('auth.signin', next=request.args.get('next')) }}" novalidate>
                 {{ form.hidden_tag() }}
 
@@ -45,6 +61,7 @@
 
                 {{ form.submit(class="btn-brand w-100") }}
             </form>
+            {% endif %}
 
             <p class="text-center muted small mt-4 mb-0">New to RansomShield? <a href="{{ url_for('auth.signup') }}" style="color:var(--brand-strong);font-weight:750">Create an account</a></p>
         </div>

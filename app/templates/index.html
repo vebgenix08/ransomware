@@ -13,8 +13,6 @@
     .hero-title { max-width: 850px; margin: 1.45rem 0 0; color: var(--text); font-size: clamp(3.2rem, 7vw, 6.6rem); font-weight: 780; letter-spacing: -.067em; line-height: .96; }
     .accent-word { color: var(--brand); }
     .hero-copy { max-width: 680px; margin-top: 1.6rem; color: var(--muted); font-size: clamp(1.05rem, 2vw, 1.2rem); line-height: 1.75; }
-    .dashboard-card { overflow: hidden; border: 1px solid var(--line); border-radius: 1.3rem; background: var(--surface); box-shadow: var(--shadow); }
-    .dashboard-header { display: flex; align-items: center; justify-content: space-between; padding: 1.1rem 1.25rem; border-bottom: 1px solid var(--line); }
     .shield-visual { width: 9.5rem; height: 9.5rem; display: grid; place-items: center; margin: 1.8rem auto; color: var(--brand-strong); border: 1px solid color-mix(in srgb, var(--brand) 25%, transparent); border-radius: 50%; background: radial-gradient(circle, var(--brand-soft) 0 47%, transparent 48%), conic-gradient(var(--brand) 0 86%, var(--surface-soft) 86% 100%); box-shadow: 0 0 0 12px var(--surface), 0 0 0 13px var(--line); font-size: 2.7rem; }
     .signal-row { display: grid; grid-template-columns: 2rem minmax(0, 1fr) auto; gap: .75rem; align-items: center; padding: .9rem 0; border-top: 1px solid var(--line); }
     .signal-icon { width: 2rem; height: 2rem; display: grid; place-items: center; color: var(--brand-strong); border-radius: .55rem; background: var(--brand-soft); }
@@ -55,7 +53,7 @@
                 <div class="col-lg-7">
                     <span class="eyebrow"><span class="status-dot"></span>Behavioral security research</span>
                     <h1 class="hero-title">Understand behavior.<br><span class="accent-word">Respond earlier.</span></h1>
-                    <p class="hero-copy">RansomShield studies file, process, and system activity to identify suspicious ransomware behavior and deliver clear, timely alerts.</p>
+                    <p class="hero-copy">RansomShield observes changes in a configured directory and benchmarks a separate model on labeled SILRAD Sysmon events.</p>
                     <div class="d-flex flex-wrap gap-3 mt-4 pt-2">
                         {% if current_user.is_authenticated %}
                             <a class="btn-brand" href="{{ url_for('main.dashboard') }}">Open dashboard <i class="bi bi-arrow-right ms-2"></i></a>
@@ -66,19 +64,15 @@
                     </div>
                     <div class="d-flex flex-wrap gap-4 mt-5 muted small">
                         <span><i class="bi bi-check2 me-2" style="color:var(--brand)"></i>Behavior-focused</span>
-                        <span><i class="bi bi-check2 me-2" style="color:var(--brand)"></i>Hybrid ML model</span>
+                        <span><i class="bi bi-check2 me-2" style="color:var(--brand)"></i>Separate live rules and CSV models</span>
                         <span><i class="bi bi-check2 me-2" style="color:var(--brand)"></i>Alert-driven</span>
                     </div>
                 </div>
                 <div class="col-lg-5">
-                    <div class="dashboard-card" aria-label="System status concept preview">
-                        <div class="dashboard-header"><div><small class="muted d-block">SYSTEM OVERVIEW</small><strong>Behavior monitor</strong></div><span class="phase-state active">Concept preview</span></div>
-                        <div class="p-4">
-                            <div class="shield-visual"><i class="bi bi-shield-check"></i></div>
-                            <div class="text-center mb-4"><div class="h4 mb-1">Normal activity</div><div class="muted small">Example behavioral risk state</div></div>
-                            <div class="signal-row"><span class="signal-icon"><i class="bi bi-folder2-open"></i></span><div><strong class="small d-block">File operations</strong><span class="muted" style="font-size:.75rem">Within normal range</span></div><span class="phase-state">Stable</span></div>
-                            <div class="signal-row"><span class="signal-icon"><i class="bi bi-cpu"></i></span><div><strong class="small d-block">Process behavior</strong><span class="muted" style="font-size:.75rem">Baseline matched</span></div><span class="phase-state">Normal</span></div>
-                        </div>
+                    <div class="text-center p-4 p-lg-5" aria-label="RansomShield capabilities">
+                        <div class="shield-visual"><i class="bi bi-shield-check"></i></div>
+                        <h2 class="h4 mb-3">One place to investigate activity</h2>
+                        <p class="muted mx-auto" style="max-width:24rem">Observe a directory, evaluate a labeled dataset, and review the evidence and response history.</p>
                     </div>
                 </div>
             </div>
@@ -90,15 +84,15 @@
     <section id="how-it-works" class="section-space">
         <div class="container">
             <div class="row align-items-end g-4 mb-5">
-                <div class="col-lg-8"><div class="section-kicker">How it works</div><h2 class="section-title">A straightforward path from system activity to an actionable alert.</h2></div>
-                <div class="col-lg-4"><p class="muted mb-0">Each layer has one responsibility, making the system easier to build, test, explain, and improve.</p></div>
+                <div class="col-lg-8"><div class="section-kicker">How it works</div><h2 class="section-title">Live folder alerts and CSV model evaluations stay separate.</h2></div>
+                <div class="col-lg-4"><p class="muted mb-0">The live monitor uses explainable file-change rules. Machine-learning models run separately on labeled CSV datasets.</p></div>
             </div>
             <div class="row g-4">
                 {% set steps = [
-                    ('bi-activity', 'Collect behavior', 'Observe relevant file operations, process events, CPU usage, and memory activity.'),
-                    ('bi-funnel', 'Prepare features', 'Clean and normalize event data, then organize it into ordered temporal windows.'),
-                    ('bi-diagram-3', 'Analyze patterns', 'Use TCN-derived temporal features with XGBoost to estimate suspicious behavior.'),
-                    ('bi-bell', 'Generate alerts', 'Show the risk score, event evidence, and timestamp through the Flask dashboard.')
+                    ('bi-activity', 'Collect folder activity', 'Observe file creates, changes, and deletes in one configured directory. The app does not attribute changes to a process.'),
+                    ('bi-funnel', 'Apply live burst rules', 'Count distinct file changes in a rolling 30-second window. The activity score is a heuristic, not a malware probability.'),
+                    ('bi-diagram-3', 'Evaluate SILRAD Sysmon events', 'Train on SILRAD’s published training split and report results on its separate held-out test events. This benchmark does not drive live alerts.'),
+                    ('bi-bell', 'Review evidence', 'See the source, observed counts, model results, and downloadable reports. Live burst alerts do not move files automatically.')
                 ] %}
                 {% for icon, title, copy in steps %}
                     <div class="col-md-6 col-xl-3">
@@ -117,16 +111,16 @@
             <div class="row g-5 align-items-start">
                 <div class="col-lg-5">
                     <div class="section-kicker">Project roadmap</div><h2 class="section-title">Building RansomShield one validated layer at a time.</h2>
-                    <p class="muted mt-4">Status reflects local implementation and testing as of 14 October 2026. Synthetic results do not establish real-world detection performance.</p>
-                    <div class="mt-4 p-4 rounded-4" style="background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 24%,transparent)"><div class="d-flex gap-3"><i class="bi bi-compass fs-4" style="color:var(--accent)"></i><div><strong class="d-block mb-1">Current focus</strong><span class="muted small">Compatible published telemetry, physical two-laptop transfer, and real notification delivery verification.</span></div></div></div>
+                    <p class="muted mt-4">Status reflects local implementation and testing as of 20 October 2026. Synthetic results do not establish real-world detection performance.</p>
+                    <div class="mt-4 p-4 rounded-4" style="background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 24%,transparent)"><div class="d-flex gap-3"><i class="bi bi-compass fs-4" style="color:var(--accent)"></i><div><strong class="d-block mb-1">Current focus</strong><span class="muted small">Independent validation with real labeled endpoint telemetry, physical two-laptop transfer, and live notification delivery verification.</span></div></div></div>
                 </div>
                 <div class="col-lg-7">
                     <div class="roadmap-wrap">
                         <article class="roadmap-item complete"><span class="roadmap-marker"><i class="bi bi-check-lg"></i></span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 01</span><span class="phase-state">Completed</span></div><h3 class="h5">Research and system design</h3><p class="muted mb-0">Define the problem, related work, behavioral signals, and hybrid architecture.</p></article>
                         <article class="roadmap-item complete"><span class="roadmap-marker">02</span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 02</span><span class="phase-state">Completed</span></div><h3 class="h5">Flask application and accounts</h3><p class="muted mb-0">Authentication, live dashboard, run history, incident details and downloadable CSV reports are implemented and locally tested.</p></article>
-                        <article class="roadmap-item complete"><span class="roadmap-marker">03</span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 03</span><span class="phase-state">Completed</span></div><h3 class="h5">Synthetic model and safe response</h3><p class="muted mb-0">TCN + XGBoost trained on 6,000 synthetic sequences. Safe simulations, telemetry CSV evaluation, test-file quarantine and configurable notifications are locally tested.</p></article>
-                        <article class="roadmap-item current"><span class="roadmap-marker">04</span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 04</span><span class="phase-state active">In progress</span></div><h3 class="h5">Published dataset integration</h3><p class="muted mb-0">Published MLRan CSV integrated with separately trained XGBoost: 2,300 training and 324 held-out samples. Temporal TCN validation on published data remains pending.</p></article>
-                        <article class="roadmap-item"><span class="roadmap-marker">05</span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 05</span><span class="phase-state">Planned</span></div><h3 class="h5">External validation and two-laptop delivery</h3><p class="muted mb-0">Verify secure transfer on actual laptops, real email/webhook delivery and independent published-data performance.</p></article>
+                        <article class="roadmap-item complete"><span class="roadmap-marker">03</span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 03</span><span class="phase-state">Research prototype</span></div><h3 class="h5">Behavior model and response audit</h3><p class="muted mb-0">The telemetry model was trained on synthetic sequences. It is experimental and has not been validated on live endpoint ransomware behavior.</p></article>
+                        <article class="roadmap-item complete"><span class="roadmap-marker">04</span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 04</span><span class="phase-state">Completed locally</span></div><h3 class="h5">Published dataset integration</h3><p class="muted mb-0">Published MLRan CSV integrated with a separately trained XGBoost model: 2,300 training and 324 held-out samples. Results apply to this dataset only.</p></article>
+                        <article class="roadmap-item current"><span class="roadmap-marker">05</span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 05</span><span class="phase-state active">Not yet verified</span></div><h3 class="h5">External validation and delivery</h3><p class="muted mb-0">Independent evaluation on labeled endpoint telemetry, physical two-laptop transfer, and live notification delivery still require verification.</p></article>
                     </div>
                 </div>
             </div>

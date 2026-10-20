@@ -1,0 +1,11 @@
+.git
+.venv
+venv
+instance
+.env
+.flaskenv
+.playwright-cli
+__pycache__
+*.py[cod]
+tests
+*.pptx
