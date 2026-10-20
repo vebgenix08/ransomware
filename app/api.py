@@ -199,7 +199,9 @@ def monitor_status():
     status = monitor.status()
     if not monitor.owned_by(current_user.id):
         status = {
-            "running": False, "connection_state": "Unavailable", "model_state": "Rolling burst rules",
+            "running": False,
+            "connection_state": "In use by another account" if monitor.is_running else "Stopped",
+            "model_state": "Rolling burst rules",
             "target": "Not assigned to this account", "interval_seconds": status["interval_seconds"],
             "reconcile_seconds": status["reconcile_seconds"], "auto_quarantine": False,
             "cpu_percent": 0, "memory_percent": 0, "process_count": 0, "last_check": None,

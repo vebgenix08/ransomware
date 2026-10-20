@@ -135,6 +135,7 @@ class RunTests(unittest.TestCase):
         self.assertEqual([item['original_path'] for item in self.client.get('/api/quarantine').json['items']], ['private.txt'])
         self.assertEqual(self.client.post(f'/api/alerts/{own_alert.id}/acknowledge').status_code, 404)
         self.assertEqual(self.client.post(f'/api/quarantine/{own_item.id}/restore').status_code, 404)
+        self.assertEqual(self.client.get(f'/api/alerts/{own_alert.id}/report.csv').status_code, 404)
 
         class ActiveMonitor:
             is_running = True
@@ -163,6 +164,7 @@ class RunTests(unittest.TestCase):
             status = self.client.get('/api/monitor/status').json
             self.assertEqual(status['event_count'], 1)
             self.assertEqual(status['status']['target'], 'Not assigned to this account')
+            self.assertEqual(status['status']['connection_state'], 'In use by another account')
             self.assertEqual(status['status']['cpu_percent'], 0)
             self.assertEqual(self.client.post('/api/monitor/start').status_code, 409)
             self.assertEqual(self.client.post('/api/monitor/stop').status_code, 403)
