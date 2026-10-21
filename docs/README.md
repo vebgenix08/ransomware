@@ -2,25 +2,40 @@
 
 RansomShield is a local Flask research prototype for directory activity monitoring and labeled CSV evaluation. Live monitoring uses explicit rolling file-change burst rules; it reports an activity anomaly, not a ransomware verdict. The temporal TCN + XGBoost detector was trained on synthetic sequences and is used only for offline telemetry CSV evaluation. Neither path is production endpoint protection.
 
-## Start the application
+## Download and set up on Windows
 
-From the project directory in PowerShell:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-python run.py
-```
-
-Open <http://127.0.0.1:5000>, create an account, and sign in. Account credentials are separate from the Gmail notification credentials in `.env`.
-
-For a new installation, install dependencies and create a secret first:
+These steps assume Git and Python are installed. Run each command in PowerShell. The `.env` file and Firebase private key belong to each installation; they are intentionally not downloaded from Git.
 
 ```powershell
-python -m pip install -r requirements.txt
-python -c "import secrets; print(secrets.token_hex(32))"
+git clone https://github.com/vebgenix08/ransomware.git
+cd ransomware
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env
+.\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-Copy `.env.example` to `.env`, paste the generated value into `SECRET_KEY`, then start the app. The existing local `.env` is ignored by Git and must never be committed or shared.
+Open `.env` in a text editor. Paste the generated random value after `SECRET_KEY=`. For a basic local run, leave `DATABASE_URL` blank (SQLite is created automatically), keep `AUTH_PROVIDER=local`, and leave SMTP/Firebase fields blank. Save the file. Never commit or share `.env`.
+
+## Run and sign in
+
+From the project folder in PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe run.py
+```
+
+Open <http://127.0.0.1:5000>, create an account with an email you can access, and sign in. Keep the terminal open while using the app; press **Ctrl+C** there to stop it. If PowerShell says the address is already in use, another RansomShield server is running on port 5000.
+
+## Configure Firebase and email
+
+Both services are optional for a local first run. Configure only the services you want, in the project-root `.env`, then restart the app.
+
+- **Firebase sign-in:** follow [FIREBASE_SETUP_WALKTHROUGH.md](FIREBASE_SETUP_WALKTHROUGH.md). It explains creating a Firebase project, enabling Email/Password, filling the `FIREBASE_*` web settings, and securely configuring the Firebase Admin service-account file. Keep `AUTH_PROVIDER=local` until every Firebase step is complete; then set it to `firebase`. Never commit or send the Admin JSON key.
+- **Email alerts:** configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY`, `SMTP_USERNAME`, `SMTP_PASSWORD`, and `RESPONSE_EMAIL_FROM`. For Gmail, use a Google App Password, not the normal account password. Alerts for signed-in users are sent to their account email; `RESPONSE_EMAIL_TO` is only a fallback. See [INTEGRATIONS_SETUP.md](INTEGRATIONS_SETUP.md) for the exact `.env` example and SMTP settings. Restart the app after saving changes.
+
+An email is sent only when the application creates an alert and email notification is enabled for that account. An SMTP “sent” result means the mail server accepted the message; check Inbox and Spam to confirm arrival. Firebase Firestore, Firebase Storage, and Firebase Hosting are not needed for the current local app. Firebase Authentication does not replace the app's SQLite/PostgreSQL database.
 
 ## Use the dashboard
 
