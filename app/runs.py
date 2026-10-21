@@ -20,11 +20,12 @@ def execute(app, run, upload, dataset_name="Uploaded telemetry", source="User-pr
         root = Path(app.config["RUNS_PATH"]).resolve() / run.id
         root.mkdir(parents=True, exist_ok=False)
         if run.kind == "silrad":
-            from .silrad import evaluate_test
+            from .silrad_incremental import evaluate_test
             # Use the prepared local file directly; do not copy the 70+ MB
             # public test split into every run's private working directory.
-            csv_path = Path(app.instance_path) / "silrad" / "fasttext-testmodel.csv"
-            report = evaluate_test(csv_path, Path(app.instance_path) / "silrad",
+            dataset_dir = Path(app.config["SILRAD_DATA_DIR"])
+            csv_path = dataset_dir / "fasttext-testmodel.csv"
+            report = evaluate_test(csv_path, dataset_dir,
                                    predictions_csv=root / "predictions.csv")
             report["dataset"] = dataset_name
         else:
@@ -34,7 +35,7 @@ def execute(app, run, upload, dataset_name="Uploaded telemetry", source="User-pr
         from .models import ModelRegistry
         from .registry import _sha256
         if report.get("dataset_schema") == "silrad":
-            artifact = Path(app.instance_path) / "silrad" / "xgboost.json"
+            artifact = Path(app.config["SILRAD_DATA_DIR"]) / "silrad_incremental.pkl"
             model_label = f"{report['model_name']}@{_sha256(artifact)[:12]}"
         else:
             artifact = Path(app.root_path)/("artifacts/mlran/model.json" if report.get("dataset_schema") == "mlran" else "artifacts/behavioral_model.json")

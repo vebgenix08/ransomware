@@ -12,7 +12,8 @@ from sqlalchemy import or_
 from werkzeug.datastructures import FileStorage
 
 from .extensions import csrf, db
-from .models import Alert, MonitoringEvent, AnalysisRun, QuarantineItem, User
+from .models import Alert, MonitoringEvent, AnalysisRun, QuarantineItem, User, AuditLog
+from .audit import record_audit
 from .runs import start_run, execute
 
 
@@ -122,6 +123,9 @@ def browser_folder_events():
 
     db.session.commit()
     alert_created = evaluate_browser_folder_window(folder_id, folder_name, current_user.id) if accepted else False
+    if accepted:
+        record_audit("folder_activity_received", folder=folder_name, events=accepted, alert_created=alert_created)
+        db.session.commit()
     return jsonify(ok=True, accepted=accepted, alert_created=alert_created), 202
 
 
@@ -159,6 +163,11 @@ def evaluate_browser_folder_window(folder_id: str, folder_name: str, user_id: in
          "Review this activity; this rule is an anomaly signal, not a malware verdict."),
         "high" if severe else "medium", max(risk, 60), created | modified | deleted,
         model_version="browser-folder-burst-v1", owner_id=user_id,
+        file_activity=[
+            {"path": path, "operations": [operation for operation, paths_for_operation in paths.items()
+                                           if path in paths_for_operation]}
+            for path in sorted(created | modified | deleted)
+        ],
     )
     return True
 
@@ -206,6 +215,11 @@ def evaluate_agent_window(agent: str, user_id: int) -> bool:
         "high" if severe else "medium", max(risk, 60), created | modified | deleted,
         model_version="endpoint-agent-burst-v1",
         owner_id=user_id,
+        file_activity=[
+            {"path": path, "operations": [operation for operation, paths_for_operation in paths.items()
+                                           if path in paths_for_operation]}
+            for path in sorted(created | modified | deleted)
+        ],
     )
     return True
 
@@ -244,6 +258,8 @@ def run_mlran():
     with path.open("rb") as stream:
         run = execute(current_app, start_run(current_app, current_user.id, "dataset"),
                       FileStorage(stream=stream, filename="mlran_heldout.csv"), "MLRan cleaned held-out samples", SOURCE)
+    record_audit("dataset_analysis", run_id=run.id, status=run.status, dataset_name="MLRan cleaned held-out samples")
+    db.session.commit()
     return run_response(run)
 
 
@@ -253,15 +269,17 @@ def run_silrad():
     """Evaluate only the publisher's held-out SILRAD split for this run."""
     from .silrad import SOURCE
     dataset_dir = Path(current_app.config["SILRAD_DATA_DIR"])
-    model_path = dataset_dir / "metadata.json"
+    model_path = dataset_dir / "incremental_metadata.json"
     test_path = dataset_dir / "fasttext-testmodel.csv"
     preparation = current_app.extensions["silrad_preparation"]
     if not model_path.is_file() or not test_path.is_file() or not preparation.status().get("ready"):
-        return jsonify(ok=False, message="Prepare the SILRAD benchmark on this server first."), 409
+        return jsonify(ok=False, message="Prepare the RansomShield Online Benchmark on this server first."), 409
     run = start_run(current_app, current_user.id, "silrad")
     with test_path.open("rb") as stream:
         run = execute(current_app, run, FileStorage(stream=stream, filename="fasttext-testmodel.csv"),
-                      "SILRAD publisher-provided held-out test split", SOURCE)
+                      "RansomShield Online Benchmark (published SILRAD data)", SOURCE)
+    record_audit("dataset_analysis", run_id=run.id, status=run.status, dataset_name="RansomShield Online Benchmark (published SILRAD data)")
+    db.session.commit()
     return run_response(run)
 
 
@@ -278,10 +296,10 @@ def prepare_silrad():
     started = preparation.start()
     status = preparation.status()
     if status.get("ready"):
-        return jsonify(ok=True, message="SILRAD benchmark is already prepared.", **status)
+        return jsonify(ok=True, message="RansomShield Online Benchmark is already prepared.", **status)
     if not started:
-        return jsonify(ok=True, message="SILRAD benchmark preparation is already running.", **status), 202
-    return jsonify(ok=True, message="Preparing SILRAD data and model on this server.", **status), 202
+        return jsonify(ok=True, message="RansomShield Online Benchmark preparation is already running.", **status), 202
+    return jsonify(ok=True, message="Preparing the RansomShield benchmark with published data.", **status), 202
 
 
 def get_monitor():
@@ -297,7 +315,7 @@ def monitor_status():
     public_model = json.loads(public_model_path.read_text(encoding="utf-8")) if public_model_path.exists() else {}
     telemetry_model = json.loads(telemetry_model_path.read_text(encoding="utf-8")) if telemetry_model_path.exists() else {}
     status = monitor.status()
-    if not monitor.owned_by(current_user.id):
+    if monitor.is_running and not monitor.owned_by(current_user.id):
         status = {
             "running": False,
             "connection_state": "In use by another account" if monitor.is_running else "Stopped",
@@ -312,7 +330,7 @@ def monitor_status():
         {
             "status": status,
             "event_count": MonitoringEvent.query.filter_by(user_id=current_user.id).count(),
-            "alert_count": visible_alerts().filter_by(acknowledged=False).count(),
+            "alert_count": visible_alerts().filter(Alert.resolved_at.is_(None)).count(),
             "model": {key: telemetry_model.get(key) for key in
                       ("display_name", "trained_at", "training", "metrics", "decision_threshold")},
             "live_policy": {
@@ -341,6 +359,8 @@ def start_monitor():
     started = monitor.start(owner_id=current_user.id)
     if not monitor.owned_by(current_user.id):
         return jsonify(ok=False, message="The monitor was claimed by another account. Refresh and try again."), 409
+    record_audit("monitor_started", target="app-server folder", already_running=not started)
+    db.session.commit()
     return jsonify(
         {
             "ok": True,
@@ -357,6 +377,8 @@ def stop_monitor():
     if monitor.is_running and not monitor.owned_by(current_user.id):
         return jsonify(ok=False, message="Only the account that started monitoring can stop it."), 403
     stopped = monitor.stop(owner_id=current_user.id)
+    record_audit("monitor_stopped", already_stopped=not stopped)
+    db.session.commit()
     return jsonify(
         {
             "ok": True,
@@ -381,6 +403,8 @@ def run_dataset():
     name = request.form.get("dataset_name", "Uploaded telemetry")[:200]
     source = request.form.get("source", "User-provided CSV; provenance unverified")[:500]
     run = execute(current_app, start_run(current_app, current_user.id, "dataset"), upload, name, source)
+    record_audit("dataset_analysis", run_id=run.id, status=run.status, dataset_name=name[:100])
+    db.session.commit()
     response, code = run_response(run)
     if code != 200:
         return jsonify(ok=False, message=run.result["error"], run=run.to_dict()), code
@@ -496,14 +520,29 @@ def restore_item(item_id: int):
 @login_required
 def notification_configuration():
     config = current_app.config
-    email_state = "disabled"
-    if config["RESPONSE_EMAIL_TO"]:
-        email_state = "configured" if (config["SMTP_HOST"] and config["RESPONSE_EMAIL_FROM"]
-            and config.get("SMTP_SECURITY", "starttls") in ("starttls", "ssl")
-            and (not config["SMTP_USERNAME"] or config["SMTP_PASSWORD"])) else "incomplete"
+    email_state = "disabled for this account" if not current_user.email_notifications_enabled else (
+        "configured" if (current_user.email and config["SMTP_HOST"]
+        and config["RESPONSE_EMAIL_FROM"]
+        and config.get("SMTP_SECURITY", "starttls") in ("starttls", "ssl")
+        and (not config["SMTP_USERNAME"] or config["SMTP_PASSWORD"])) else "incomplete")
     return jsonify(webhook="configured" if current_app.config["RESPONSE_WEBHOOK_URL"] else "disabled",
                    email=email_state,
-                   configuration="Fill SMTP_HOST, SMTP_PORT, SMTP_SECURITY, SMTP_USERNAME, SMTP_PASSWORD, RESPONSE_EMAIL_FROM and RESPONSE_EMAIL_TO in the project .env file. Restart the app and receiver. Use starttls (587) or ssl (465). Secrets are never displayed. Configured does not mean delivery verified.")
+                   email_recipient="signed-in account",
+                   email_enabled=current_user.email_notifications_enabled,
+                   configuration="Configure SMTP_HOST, SMTP_PORT, SMTP_SECURITY, SMTP_USERNAME, SMTP_PASSWORD and RESPONSE_EMAIL_FROM in the project .env file. Alerts go to the email on the signed-in account; RESPONSE_EMAIL_TO is only a fallback for alerts without an account owner. Restart the app after changing SMTP settings. Use starttls (587) or ssl (465). Secrets are never displayed. Configured does not mean delivery verified.")
+
+
+@api.post("/notifications/email")
+@login_required
+def update_email_notifications():
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or not isinstance(body.get("enabled"), bool):
+        return jsonify(ok=False, message="enabled must be true or false."), 400
+    current_user.email_notifications_enabled = body["enabled"]
+    record_audit("settings_changed", setting="email_notifications_enabled", enabled=body["enabled"])
+    db.session.commit()
+    return jsonify(ok=True, enabled=current_user.email_notifications_enabled,
+                   message="Email alerts enabled for this account." if body["enabled"] else "Email alerts disabled for this account.")
 
 
 @api.get("/events")
@@ -519,7 +558,20 @@ def list_events():
 @login_required
 def list_alerts():
     limit = min(max(request.args.get("limit", 10, type=int), 1), 50)
-    alerts = visible_alerts().order_by(Alert.created_at.desc()).limit(limit).all()
+    query = visible_alerts()
+    state = request.args.get("status", "all")
+    if state == "open":
+        query = query.filter(Alert.resolved_at.is_(None))
+    elif state == "resolved":
+        query = query.filter(Alert.resolved_at.isnot(None))
+    elif state != "all":
+        return jsonify(ok=False, message="status must be open, resolved, or all."), 400
+    severity = request.args.get("severity")
+    if severity:
+        if severity not in {"low", "medium", "high", "critical"}:
+            return jsonify(ok=False, message="Unknown severity filter."), 400
+        query = query.filter(Alert.severity == severity)
+    alerts = query.order_by(Alert.created_at.desc()).limit(limit).all()
     return jsonify({"alerts": [alert.to_dict() for alert in alerts]})
 
 
@@ -529,8 +581,49 @@ def acknowledge_alert(alert_id: int):
     alert = db.get_or_404(Alert, alert_id)
     check_alert_owner(alert_id)
     alert.acknowledged = True
+    record_audit("alert_acknowledged", alert_id=alert.id)
     db.session.commit()
     return jsonify({"ok": True, "alert": alert.to_dict()})
+
+
+@api.post("/alerts/<int:alert_id>/resolve")
+@login_required
+def resolve_alert(alert_id: int):
+    alert = db.get_or_404(Alert, alert_id)
+    check_alert_owner(alert_id)
+    if alert.resolved_at is None:
+        alert.resolved_at = datetime.now(timezone.utc)
+        alert.acknowledged = True
+        record_audit("alert_resolved", alert_id=alert.id)
+        db.session.commit()
+    return jsonify(ok=True, alert=alert.to_dict())
+
+
+@api.post("/alerts/<int:alert_id>/retry-email")
+@login_required
+def retry_alert_email(alert_id: int):
+    alert = db.get_or_404(Alert, alert_id)
+    check_alert_owner(alert_id)
+    action = next(iter(alert.responses), None)
+    if action is None:
+        return jsonify(ok=False, message="This alert has no notification record to retry."), 409
+    if (action.result or {}).get("notifications", {}).get("email") != "failed":
+        return jsonify(ok=False, message="Email retry is available only after a failed attempt."), 409
+    from .response import retry_alert_email as retry_email
+    sent = retry_email(current_app, alert, action)
+    record_audit("alert_email_retried", alert_id=alert.id, status="sent" if sent else "failed")
+    db.session.commit()
+    return jsonify(ok=sent, message="Email accepted by SMTP." if sent else "Email retry failed. Check SMTP configuration and server logs.",
+                   alert=alert.to_dict()), 200 if sent else 502
+
+
+@api.get("/audit")
+@login_required
+def list_audit():
+    limit = min(max(request.args.get("limit", 50, type=int), 1), 100)
+    entries = (AuditLog.query.filter_by(user_id=current_user.id)
+               .order_by(AuditLog.created_at.desc()).limit(limit).all())
+    return jsonify(entries=[entry.to_dict() for entry in entries])
 
 
 def visible_alerts():

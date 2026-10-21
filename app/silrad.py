@@ -108,7 +108,7 @@ def train_model(train_csv, model_dir):
     booster.save_model(booster_path)
     metadata = {
         "model_type": "silrad_sysmon_xgboost_hashed",
-        "display_name": "SILRAD Sysmon event XGBoost",
+        "display_name": "RansomShield XGBoost comparison",
         "source": SOURCE,
         "trained_at": datetime.now(timezone.utc).isoformat(),
         "training_file_sha256": _sha256(train_csv),

@@ -78,6 +78,45 @@ class ResponseTests(unittest.TestCase):
             self.assertEqual(action.result["notifications"], {"webhook": "sent", "email": "sent"})
             smtp.return_value.__enter__.return_value.send_message.assert_called_once()
 
+    def test_owned_alert_email_goes_to_account_not_global_fallback(self):
+        self.app.config.update(RESPONSE_EMAIL_TO="old-recipient@example.invalid",
+            RESPONSE_EMAIL_FROM="monitor@example.invalid", SMTP_HOST="smtp.example.invalid")
+        user = User(full_name="Account Owner", email="account-owner@example.invalid", password_hash="unused")
+        db.session.add(user)
+        db.session.commit()
+        alert = self.alert()
+        alert.user_id = user.id
+        db.session.commit()
+        with patch("app.response.smtplib.SMTP") as smtp:
+            action = respond(self.app, alert, self.monitor.target_path, set())
+            message = smtp.return_value.__enter__.return_value.send_message.call_args.args[0]
+        self.assertEqual(message["To"], "account-owner@example.invalid")
+        self.assertEqual(action.result["notifications"]["email"], "sent")
+
+    def test_alert_email_lists_changed_file_paths(self):
+        self.app.config.update(RESPONSE_EMAIL_TO="analyst@example.invalid",
+            RESPONSE_EMAIL_FROM="monitor@example.invalid", SMTP_HOST="smtp.example.invalid")
+        alert = self.alert()
+        alert.model_version = "rolling-file-burst-v1"
+        alert.rule_trace = [
+            {"signal": "affected_files", "value": [
+                {"path": "reports/quarterly.xlsx", "operations": ["created", "modified"]},
+                {"path": "notes.txt", "operations": ["deleted"]},
+            ]},
+        ]
+        db.session.commit()
+        with patch("app.response.smtplib.SMTP") as smtp:
+            respond(self.app, alert, self.monitor.target_path, set())
+            message = smtp.return_value.__enter__.return_value.send_message.call_args.args[0]
+        plain_body = message.get_body(preferencelist=("plain",)).get_content()
+        html_body = message.get_body(preferencelist=("html",)).get_content()
+        self.assertIn("Activity | Path", plain_body)
+        self.assertIn("created, modified | reports/quarterly.xlsx", plain_body)
+        self.assertIn("deleted | notes.txt", plain_body)
+        self.assertIn("Affected files (paths relative to monitored folder)", html_body)
+        self.assertIn("reports/quarterly.xlsx", html_body)
+        self.assertIn("notes.txt", html_body)
+
     def test_ssl_email_authentication_and_recipient_refusal(self):
         self.app.config.update(RESPONSE_EMAIL_TO="test@example.invalid", RESPONSE_EMAIL_FROM="sender@example.invalid",
             SMTP_HOST="smtp.example.invalid", SMTP_PORT=465, SMTP_SECURITY="ssl", SMTP_USERNAME="sender", SMTP_PASSWORD="test-only")
@@ -99,9 +138,13 @@ class ResponseTests(unittest.TestCase):
             self.assertEqual([call[0] for call in connection.method_calls], ['starttls', 'login', 'send_message'])
             self.assertEqual(action.result["notifications"]["email"], "sent")
             message = connection.send_message.call_args.args[0]
-            self.assertIn("RansomShield notification", message.get_content())
-            self.assertIn("Synthetic test", message.get_content())
-            self.assertNotIn('"alert": {', message.get_content())
+            plain_body = message.get_body(preferencelist=("plain",)).get_content()
+            html_body = message.get_body(preferencelist=("html",)).get_content()
+            self.assertIn("RansomShield notification", plain_body)
+            self.assertIn("Synthetic test", plain_body)
+            self.assertIn("<table", html_body)
+            self.assertIn("Alert report", html_body)
+            self.assertNotIn('"alert": {', plain_body)
 
     def test_dataset_email_explains_that_results_are_csv_records(self):
         self.app.config.update(RESPONSE_EMAIL_TO="test@example.invalid", RESPONSE_EMAIL_FROM="sender@example.invalid",
@@ -119,12 +162,16 @@ class ResponseTests(unittest.TestCase):
         with patch("app.response.smtplib.SMTP") as smtp:
             action = respond(self.app, alert, self.monitor.target_path, set())
             message = smtp.return_value.__enter__.return_value.send_message.call_args.args[0]
-        body = message.get_content()
+        body = message.get_body(preferencelist=("plain",)).get_content()
+        html_body = message.get_body(preferencelist=("html",)).get_content()
         self.assertIn("Offline CSV dataset evaluation", body)
         self.assertIn("102 of 324", body)
         self.assertIn("Published MLRan research dataset", body)
         self.assertIn("does not mean a monitored computer is infected", body)
         self.assertIn("No files were moved to quarantine", body)
+        self.assertIn("<table", html_body)
+        self.assertIn("102 of 324", html_body)
+        self.assertIn("Published MLRan research dataset", html_body)
         self.assertNotIn('"alert": {', body)
         self.assertIn("dataset analysis flagged records", message["Subject"])
         self.assertEqual(action.result["notifications"]["email"], "sent")
@@ -166,6 +213,9 @@ class ResponseTests(unittest.TestCase):
         self.assertEqual(alert.title, "High-volume file-change burst")
         self.assertEqual(alert.model_version, "rolling-file-burst-v1")
         self.assertEqual(alert.rule_trace[-1]["value"], "rolling-file-burst-v1")
+        affected_files = next(item["value"] for item in alert.rule_trace if item["signal"] == "affected_files")
+        self.assertEqual(len(affected_files), 20)
+        self.assertIn("modified-0.txt", {item["path"] for item in affected_files})
         action = ResponseAction.query.one()
         self.assertTrue(action.completed)
         self.assertEqual(action.result["quarantine"], "below_quarantine_threshold")

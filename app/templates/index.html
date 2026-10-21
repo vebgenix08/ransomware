@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
-{% block title %}RansomShield | Behavioral Threat Detection{% endblock %}
+{% block title %}RansomShield | File activity research prototype{% endblock %}
+{% block description %}Monitor file activity with review alerts, and separately evaluate published labeled security datasets.{% endblock %}
 
 {% block styles %}
 <style>
@@ -51,28 +52,34 @@
         <div class="container">
             <div class="row align-items-center g-5">
                 <div class="col-lg-7">
-                    <span class="eyebrow"><span class="status-dot"></span>Behavioral security research</span>
-                    <h1 class="hero-title">Understand behavior.<br><span class="accent-word">Respond earlier.</span></h1>
-                    <p class="hero-copy">RansomShield observes changes in a configured directory and benchmarks a separate model on labeled SILRAD Sysmon events.</p>
+                    <span class="eyebrow"><span class="status-dot"></span>Research prototype · file activity monitoring</span>
+                    <h1 class="hero-title">See file activity.<br><span class="accent-word">Review the evidence.</span></h1>
+                    <p class="hero-copy">RansomShield combines live file-change alerts with a separate benchmark for published, labeled security data. It helps you inspect activity; it does not confirm that a device is infected.</p>
                     <div class="d-flex flex-wrap gap-3 mt-4 pt-2">
                         {% if current_user.is_authenticated %}
                             <a class="btn-brand" href="{{ url_for('main.dashboard') }}">Open dashboard <i class="bi bi-arrow-right ms-2"></i></a>
                         {% else %}
-                            <a class="btn-brand" href="{{ url_for('auth.signup') }}">Create free account <i class="bi bi-arrow-right ms-2"></i></a>
+                            <a class="btn-brand" href="{{ url_for('auth.signup') }}">Create account <i class="bi bi-arrow-right ms-2"></i></a>
                             <a class="btn-outline-custom" href="{{ url_for('auth.signin') }}">Sign in</a>
                         {% endif %}
                     </div>
                     <div class="d-flex flex-wrap gap-4 mt-5 muted small">
-                        <span><i class="bi bi-check2 me-2" style="color:var(--brand)"></i>Behavior-focused</span>
-                        <span><i class="bi bi-check2 me-2" style="color:var(--brand)"></i>Separate live rules and CSV models</span>
-                        <span><i class="bi bi-check2 me-2" style="color:var(--brand)"></i>Alert-driven</span>
+                        <span><i class="bi bi-folder2 me-2" style="color:var(--brand)"></i>Browser folder monitoring</span>
+                        <span><i class="bi bi-bar-chart me-2" style="color:var(--brand)"></i>Offline SILRAD benchmark</span>
                     </div>
                 </div>
                 <div class="col-lg-5">
-                    <div class="text-center p-4 p-lg-5" aria-label="RansomShield capabilities">
-                        <div class="shield-visual"><i class="bi bi-shield-check"></i></div>
-                        <h2 class="h4 mb-3">One place to investigate activity</h2>
-                        <p class="muted mx-auto" style="max-width:24rem">Observe a directory, evaluate a labeled dataset, and review the evidence and response history.</p>
+                    <div class="workflow-visual" aria-label="Two separate RansomShield workflows">
+                        <div class="workflow-label mb-2">Two workflows · one workspace</div>
+                        <div class="workflow-row">
+                            <span class="workflow-icon"><i class="bi bi-folder2-open"></i></span>
+                            <div><div class="workflow-title">Live folder activity</div><div class="muted small">File changes → review alert</div></div>
+                        </div>
+                        <div class="workflow-row">
+                            <span class="workflow-icon"><i class="bi bi-database-check"></i></span>
+                            <div><div class="workflow-title">Offline dataset benchmark</div><div class="muted small">Labeled records → evaluation report</div></div>
+                        </div>
+                        <p class="muted small border-top pt-3 mb-0">The benchmark does not power live alerts. Live alerts are activity signals, not malware verdicts.</p>
                     </div>
                 </div>
             </div>
@@ -80,18 +87,18 @@
     </section>
 </header>
 
-<main>
+<main id="main-content">
     <section id="how-it-works" class="section-space">
         <div class="container">
-            <div class="row align-items-end g-4 mb-5">
-                <div class="col-lg-8"><div class="section-kicker">How it works</div><h2 class="section-title">Live folder alerts and CSV model evaluations stay separate.</h2></div>
-                <div class="col-lg-4"><p class="muted mb-0">The live monitor uses explainable file-change rules. Machine-learning models run separately on labeled CSV datasets.</p></div>
+            <div class="row align-items-end g-4 mb-4">
+                <div class="col-lg-8"><div class="section-kicker">How it works</div><h2 class="section-title">Two workflows. Clear evidence for each.</h2></div>
+                <div class="col-lg-4"><p class="muted mb-0">Live alerts use file-change rules. Machine-learning evaluation uses labeled dataset rows offline.</p></div>
             </div>
             <div class="row g-4">
                 {% set steps = [
                     ('bi-activity', 'Collect folder activity', 'Observe file creates, changes, and deletes in one configured directory. The app does not attribute changes to a process.'),
                     ('bi-funnel', 'Apply live burst rules', 'Count distinct file changes in a rolling 30-second window. The activity score is a heuristic, not a malware probability.'),
-                    ('bi-diagram-3', 'Evaluate SILRAD Sysmon events', 'Train on SILRAD’s published training split and report results on its separate held-out test events. This benchmark does not drive live alerts.'),
+                    ('bi-diagram-3', 'Run the RansomShield Online Benchmark', 'Test an incremental model on a published Sysmon stream. The benchmark uses SILRAD data and does not drive live alerts.'),
                     ('bi-bell', 'Review evidence', 'See the source, observed counts, model results, and downloadable reports. Live burst alerts do not move files automatically.')
                 ] %}
                 {% for icon, title, copy in steps %}
@@ -111,8 +118,8 @@
             <div class="row g-5 align-items-start">
                 <div class="col-lg-5">
                     <div class="section-kicker">Project roadmap</div><h2 class="section-title">Building RansomShield one validated layer at a time.</h2>
-                    <p class="muted mt-4">Status reflects local implementation and testing as of 20 October 2026. Synthetic results do not establish real-world detection performance.</p>
-                    <div class="mt-4 p-4 rounded-4" style="background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 24%,transparent)"><div class="d-flex gap-3"><i class="bi bi-compass fs-4" style="color:var(--accent)"></i><div><strong class="d-block mb-1">Current focus</strong><span class="muted small">Independent validation with real labeled endpoint telemetry, physical two-laptop transfer, and live notification delivery verification.</span></div></div></div>
+                    <p class="muted mt-4">Status reflects the current local implementation. Synthetic results do not establish real-world detection performance.</p>
+                    <div class="mt-4 p-4 rounded-4" style="background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 24%,transparent)"><div class="d-flex gap-3"><i class="bi bi-compass fs-4" style="color:var(--accent)"></i><div><strong class="d-block mb-1">Next research milestone</strong><span class="muted small">Collect independently labeled endpoint telemetry and validate the live rules against benign and ransomware activity. Current live alerts are not malware verdicts.</span></div></div></div>
                 </div>
                 <div class="col-lg-7">
                     <div class="roadmap-wrap">
@@ -120,7 +127,7 @@
                         <article class="roadmap-item complete"><span class="roadmap-marker">02</span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 02</span><span class="phase-state">Completed</span></div><h3 class="h5">Flask application and accounts</h3><p class="muted mb-0">Authentication, live dashboard, run history, incident details and downloadable CSV reports are implemented and locally tested.</p></article>
                         <article class="roadmap-item complete"><span class="roadmap-marker">03</span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 03</span><span class="phase-state">Research prototype</span></div><h3 class="h5">Behavior model and response audit</h3><p class="muted mb-0">The telemetry model was trained on synthetic sequences. It is experimental and has not been validated on live endpoint ransomware behavior.</p></article>
                         <article class="roadmap-item complete"><span class="roadmap-marker">04</span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 04</span><span class="phase-state">Completed locally</span></div><h3 class="h5">Published dataset integration</h3><p class="muted mb-0">Published MLRan CSV integrated with a separately trained XGBoost model: 2,300 training and 324 held-out samples. Results apply to this dataset only.</p></article>
-                        <article class="roadmap-item current"><span class="roadmap-marker">05</span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 05</span><span class="phase-state active">Not yet verified</span></div><h3 class="h5">External validation and delivery</h3><p class="muted mb-0">Independent evaluation on labeled endpoint telemetry, physical two-laptop transfer, and live notification delivery still require verification.</p></article>
+                        <article class="roadmap-item current"><span class="roadmap-marker">05</span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 05</span><span class="phase-state active">In progress</span></div><h3 class="h5">Independent endpoint validation</h3><p class="muted mb-0">The remaining research milestone is testing live monitoring against independently labeled endpoint activity and measuring false positives and missed events.</p></article>
                     </div>
                 </div>
             </div>

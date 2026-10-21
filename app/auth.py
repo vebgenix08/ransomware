@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from .extensions import db
 from .forms import SigninForm, SignupForm
 from .models import User
+from .audit import record_audit
 
 
 auth = Blueprint("auth", __name__, url_prefix="/auth")
@@ -48,6 +49,8 @@ def signup():
         db.session.add(user)
         db.session.commit()
         login_user(user)
+        record_audit("account_created", provider="local")
+        db.session.commit()
         flash("Your account has been created successfully.", "success")
         return redirect(url_for("main.dashboard"))
 
@@ -72,6 +75,8 @@ def signin():
 
         if user and user.check_password(form.password.data):
             login_user(user, remember=form.remember.data)
+            record_audit("login", provider="local")
+            db.session.commit()
             flash(f"Welcome back, {user.full_name}.", "success")
             next_page = request.args.get("next")
             if is_safe_redirect_target(next_page):
@@ -139,12 +144,16 @@ def firebase_session():
         return jsonify(error="This account could not be linked safely. Contact the administrator."), 409
 
     login_user(user, remember=False, fresh=True)
+    record_audit("login", provider="firebase")
+    db.session.commit()
     return jsonify(ok=True, next=url_for("main.dashboard"))
 
 
 @auth.post("/logout")
 def logout():
     if current_user.is_authenticated:
+        record_audit("logout")
+        db.session.commit()
         logout_user()
         flash("You have been signed out.", "success")
     return redirect(url_for("main.index"))

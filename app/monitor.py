@@ -331,12 +331,20 @@ class MonitoringService:
 
         if file_changes:
             details = (
-                f"Observed {file_changes} monitored-directory changes "
-                f"({len(created)} created, {len(modified)} modified, {len(deleted)} deleted; "
-                f"{operation_rate} operations/s)."
+                f"{file_changes} file changes: {len(created)} created, "
+                f"{len(modified)} modified, {len(deleted)} deleted. "
+                f"Detected at {operation_rate} changes per second."
             )
+            event_files = [
+                {"operation": operation, "path": path}
+                for operation, paths in (("created", created), ("modified", modified), ("deleted", deleted))
+                for path in sorted(paths)
+            ]
             severity = "warning" if burst_detected else "info"
-            self._persist_event("file_activity", severity, details, risk_score, source="reconcile" if reconcile else "watchdog")
+            self._persist_event(
+                "file_activity", severity, details, risk_score,
+                source="reconcile" if reconcile else "watchdog", file_activity=event_files,
+            )
 
             if burst_detected and now_monotonic - self._last_burst_alert_at >= ALERT_COOLDOWN_SECONDS:
                 self._last_burst_alert_at = now_monotonic
@@ -358,6 +366,21 @@ class MonitoringService:
                     "high" if severe_burst else "medium",
                     burst_score,
                     window_touched,
+                    file_activity=[
+                        {
+                            "path": path,
+                            "operations": [
+                                operation
+                                for operation, paths in (
+                                    ("created", window_created),
+                                    ("modified", window_modified),
+                                    ("deleted", window_deleted),
+                                )
+                                if path in paths
+                            ],
+                        }
+                        for path in sorted(window_touched)
+                    ],
                 )
 
     def _persist_event(        self,
@@ -366,6 +389,7 @@ class MonitoringService:
         details: str,
         risk_score: int,
         source: str = "poll",
+        file_activity=None,
     ) -> None:
         if not self.app:
             return
@@ -376,6 +400,7 @@ class MonitoringService:
                     event_type=event_type,
                     severity=severity,
                     details=details,
+                    file_activity=file_activity or [],
                     risk_score=risk_score,
                     event_id=str(uuid4()),
                     source=source,
@@ -392,6 +417,7 @@ class MonitoringService:
         affected=None,
         model_version: str = "rolling-file-burst-v1",
         owner_id: Optional[int] = None,
+        file_activity=None,
     ) -> None:
         if not self.app:
             return
@@ -406,6 +432,8 @@ class MonitoringService:
                     rule_trace=[
                         {"signal": "files_touched_in_window", "value": len(affected or ())},
                         {"signal": "risk_score", "value": risk_score},
+                        *([{"signal": "affected_files", "value": file_activity[:100]}]
+                          if file_activity else []),
                         {"signal": "policy", "value": "rolling-file-burst-v1"},
                     ],
                 )

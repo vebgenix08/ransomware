@@ -20,6 +20,7 @@ class User(UserMixin, db.Model):
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
     firebase_uid = db.Column(db.String(128), unique=True, nullable=True, index=True)
+    email_notifications_enabled = db.Column(db.Boolean, nullable=False, default=True, server_default="1")
     created_at = db.Column(
         db.DateTime(timezone=True),
         nullable=False,
@@ -42,6 +43,7 @@ class MonitoringEvent(db.Model):
     event_type = db.Column(db.String(50), nullable=False, index=True)
     severity = db.Column(db.String(20), nullable=False, default="info")
     details = db.Column(db.String(500), nullable=False)
+    file_activity = db.Column(db.JSON, nullable=True)
     risk_score = db.Column(db.Integer, nullable=False, default=0)
     source = db.Column(db.String(20), nullable=False, default="poll")
     created_at = db.Column(
@@ -58,6 +60,7 @@ class MonitoringEvent(db.Model):
             "event_type": self.event_type,
             "severity": self.severity,
             "details": self.details,
+            "file_activity": self.file_activity or [],
             "risk_score": self.risk_score,
             "source": self.source,
             "created_at": utc_isoformat(self.created_at),
@@ -74,6 +77,7 @@ class Alert(db.Model):
     severity = db.Column(db.String(20), nullable=False, default="medium")
     risk_score = db.Column(db.Integer, nullable=False)
     acknowledged = db.Column(db.Boolean, nullable=False, default=False)
+    resolved_at = db.Column(db.DateTime(timezone=True), nullable=True)
     model_version = db.Column(db.String(80), nullable=True)
     rule_trace = db.Column(db.JSON, nullable=True)
     created_at = db.Column(
@@ -91,6 +95,7 @@ class Alert(db.Model):
             "severity": self.severity,
             "risk_score": self.risk_score,
             "acknowledged": self.acknowledged,
+            "resolved_at": utc_isoformat(self.resolved_at) if self.resolved_at else None,
             "model_version": self.model_version,
             "rule_trace": self.rule_trace or [],
             "response": next((item.to_dict() for item in self.responses), None),
@@ -108,6 +113,23 @@ class ResponseAction(db.Model):
 
     def to_dict(self):
         return {"id": self.id, "completed": self.completed, **self.result}
+
+
+class AuditLog(db.Model):
+    """Account-scoped record of security-relevant user and workflow actions."""
+
+    __tablename__ = "audit_logs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    action = db.Column(db.String(80), nullable=False, index=True)
+    details = db.Column(db.JSON, nullable=False, default=dict)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False,
+                            default=lambda: datetime.now(timezone.utc), index=True)
+
+    def to_dict(self) -> dict:
+        return {"id": self.id, "action": self.action, "details": self.details or {},
+                "created_at": utc_isoformat(self.created_at)}
 
 
 class AnalysisRun(db.Model):

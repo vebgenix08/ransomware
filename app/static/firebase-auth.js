@@ -86,6 +86,24 @@ signupForm?.addEventListener("submit", async (event) => {
 });
 
 const signinForm = document.querySelector('[data-firebase-form="signin"]');
+const resetPanel = document.querySelector("[data-firebase-reset-panel]");
+const resetEmail = document.querySelector("[data-firebase-reset-email]");
+const forgotButton = document.querySelector("[data-firebase-forgot]");
+forgotButton?.addEventListener("click", () => {
+  if (resetEmail && signinForm?.elements.email) resetEmail.value = signinForm.elements.email.value.trim();
+  signinForm?.classList.add("d-none");
+  resetPanel?.classList.remove("d-none");
+  showStatus("");
+  resetEmail?.focus();
+});
+
+document.querySelector("[data-firebase-reset-back]")?.addEventListener("click", () => {
+  resetPanel?.classList.add("d-none");
+  signinForm?.classList.remove("d-none");
+  showStatus("");
+  signinForm?.elements.email?.focus();
+});
+
 signinForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = new FormData(signinForm);
@@ -103,12 +121,13 @@ signinForm?.addEventListener("submit", async (event) => {
   }
 });
 
-document.querySelector("[data-firebase-reset]")?.addEventListener("click", async () => {
-  const email = String(signinForm?.elements.email?.value || "").trim();
-  if (!email) return showStatus("Enter your email address first, then select password reset.", true);
+resetPanel?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const email = String(resetEmail?.value || "").trim();
+  if (!email) return showStatus("Enter your account email address.", true);
   try {
     await sendPasswordResetEmail(auth, email);
-    showStatus("If a Firebase account exists for that email, a password-reset link has been sent.");
+    showStatus("If an account exists for that email, a password reset link has been sent.");
   } catch (error) {
     showStatus(readableError(error), true);
   }

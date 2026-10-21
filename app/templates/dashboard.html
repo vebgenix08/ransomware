@@ -6,6 +6,17 @@
 {% block styles %}
 <style>
     .dashboard-heading { font-size: clamp(2.2rem, 5vw, 3.7rem); font-weight: 780; letter-spacing: -.055em; }
+    .dashboard-tabs { display:flex; gap:.35rem; overflow-x:auto; margin:0 0 1.5rem; padding:.4rem; border:1px solid var(--line); border-radius:.9rem; background:var(--surface); scrollbar-width:thin; }
+    .dashboard-tab { flex:0 0 auto; padding:.65rem .9rem; border:0; border-radius:.6rem; color:var(--muted); background:transparent; font-size:.82rem; font-weight:750; }
+    .dashboard-tab[aria-selected="true"] { color:var(--brand-strong); background:var(--brand-soft); }
+    .howto-step { display:grid; grid-template-columns:2rem minmax(0,1fr); gap:.8rem; padding:1rem 0; border-bottom:1px solid var(--line); }
+    .howto-step:last-child { border-bottom:0; }
+    .howto-number { display:grid; place-items:center; width:2rem; height:2rem; border-radius:50%; color:var(--brand-strong); background:var(--brand-soft); font-weight:800; }
+    .monitor-stats { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.65rem 1rem; }
+    .monitor-stats > div { display:flex; flex-direction:column; gap:.15rem; padding:.65rem 0; border-top:1px solid var(--line); }
+    .monitor-stats span { color:var(--muted); font-size:.74rem; }
+    .monitor-stats strong { font-size:.85rem; }
+    @media(max-width:575.98px) { .monitor-stats { grid-template-columns:1fr; } }
     .status-card { height: 100%; padding: 1.35rem; border: 1px solid var(--line); border-radius: 1rem; background: var(--surface); }
     .status-icon { width: 2.8rem; height: 2.8rem; display: grid; place-items: center; color: var(--brand-strong); border-radius: .75rem; background: var(--brand-soft); font-size: 1.15rem; }
     .metric-value { font-size: 2rem; font-weight: 780; letter-spacing: -.04em; }
@@ -30,17 +41,13 @@
 {% endblock %}
 
 {% block content %}
-<main class="page-shell" x-data="monitorDashboard()">
+<main id="main-content" class="page-shell" x-data="monitorDashboard()">
     <div class="container">
         <div class="d-flex flex-column flex-xl-row justify-content-between align-items-xl-end gap-4 mb-4">
             <div>
                 <span class="account-chip"><i class="bi bi-shield-check"></i>Authenticated workspace</span>
-                <h1 class="dashboard-heading mt-3 mb-2">Welcome, {{ current_user.full_name }}.</h1>
-                <p class="muted mb-0">Choose a folder on this device, review file activity, and run the SILRAD benchmark.</p>
-            </div>
-            <div class="control-bar">
-                <button class="btn-brand" type="button" @click="startMonitor" :disabled="busy || status.running"><i class="bi bi-play-fill me-2"></i>Start server-folder monitor</button>
-                <button class="btn-outline-custom" type="button" @click="stopMonitor" :disabled="busy || !status.running"><i class="bi bi-stop-fill me-2"></i>Stop server monitor</button>
+                <h1 class="dashboard-heading mt-3 mb-2">Welcome, {{ current_user.full_name or current_user.email }}.</h1>
+                <p class="muted mb-0">Monitor a folder in this browser, evaluate the SILRAD benchmark, or review saved activity.</p>
             </div>
         </div>
 
@@ -50,108 +57,34 @@
             <button class="btn p-0 border-0 ms-auto" type="button" @click="feedback=''" aria-label="Dismiss"><i class="bi bi-x-lg"></i></button>
         </div>
 
-        <details class="panel p-4 mb-4" open>
-            <summary class="h4 mb-0">Start here: test and use RansomShield</summary>
-            <div class="row g-3 mt-1">
-                <div class="col-md-6">
-                    <h3 class="h6">1. Check dataset analysis</h3>
-                    <p class="small muted mb-0">Select <strong>Run SILRAD held-out test</strong> below to evaluate the published Sysmon events. The result describes dataset events; it does not say whether this computer is infected.</p>
-                </div>
-                <div class="col-md-6">
-                    <h3 class="h6">2. Review the benchmark result</h3>
-                    <p class="small muted mb-0">The dashboard shows the held-out test metrics and warns when recall is low. Download the row predictions for the event-by-event results.</p>
-                </div>
-                <div class="col-md-6">
-                    <h3 class="h6">3. Monitor a folder you control</h3>
-                    <p class="small muted mb-0">Use <strong>Choose folder</strong> to watch a folder on this device while this page is open. The server-folder monitor watches the hosted server only. Alerts are file-change rules, not malware proof; start with a disposable folder.</p>
-                </div>
-                <div class="col-md-6">
-                    <h3 class="h6">4. Review and export</h3>
-                    <p class="small muted mb-0">Runs, alerts, events, and quarantine records belong to this account. Select <strong>Download CSV report</strong> on a run to save its results.</p>
-                </div>
-            </div>
-        </details>
+        <nav class="dashboard-tabs" role="tablist" aria-label="Dashboard pages">
+            <button class="dashboard-tab" type="button" role="tab" id="tab-start" :aria-selected="activeTab === 'start'" aria-controls="panel-start" @click="activeTab='start'"><i class="bi bi-compass me-1"></i>Start here</button>
+            <button class="dashboard-tab" type="button" role="tab" id="tab-monitor" :aria-selected="activeTab === 'monitor'" aria-controls="panel-monitor" @click="activeTab='monitor'"><i class="bi bi-folder2-open me-1"></i>Monitor files</button>
+            <button class="dashboard-tab" type="button" role="tab" id="tab-benchmark" :aria-selected="activeTab === 'benchmark'" aria-controls="panel-benchmark" @click="activeTab='benchmark'"><i class="bi bi-bar-chart me-1"></i>SILRAD benchmark</button>
+            <button class="dashboard-tab" type="button" role="tab" id="tab-alerts" :aria-selected="activeTab === 'alerts'" aria-controls="panel-alerts" @click="activeTab='alerts'"><i class="bi bi-bell me-1"></i>Alerts</button>
+            <button class="dashboard-tab" type="button" role="tab" id="tab-account" :aria-selected="activeTab === 'account'" aria-controls="panel-account" @click="activeTab='account'"><i class="bi bi-gear me-1"></i>Email & history</button>
+        </nav>
 
-        <section class="panel p-4 mb-4" aria-labelledby="device-folder-heading">
-            <h2 id="device-folder-heading" class="h4">Monitor a folder on this device</h2>
-            <p class="small muted">Choose a folder below. While this dashboard stays open, your browser checks file names, sizes, and modified times every few seconds and sends change summaries to your account. File contents are not uploaded. Monitoring stops when you stop it or close this page; very brief changes between scans may be missed.</p>
-            <div class="d-flex flex-wrap align-items-center gap-2">
-                <button class="btn-brand" type="button" @click="chooseFolder" :disabled="folderBusy || folderWatching"><i class="bi bi-folder2-open me-2"></i>Choose folder</button>
-                <button class="btn-outline-custom" type="button" @click="stopFolderWatch" :disabled="!folderWatching"><i class="bi bi-stop-fill me-2"></i>Stop device-folder monitoring</button>
-                <span class="state-badge" :class="folderWatching ? 'running' : ''"><span class="state-dot"></span><span x-text="folderWatching ? 'Watching in this browser' : 'Not watching'"></span></span>
-            </div>
-            <p class="small mt-3 mb-0" :class="folderMessageType === 'error' ? 'text-danger' : 'muted'" x-text="folderMessage || 'Use Chrome or Edge on HTTPS (or localhost). Start with a disposable test folder.'" role="status"></p>
-            <p class="small muted mt-2 mb-0" x-show="folderName">Selected folder: <strong x-text="folderName"></strong> · <span x-text="folderFileCount"></span> files in last scan</p>
-        </section>
-
-        <section class="panel p-4 mb-4" aria-labelledby="silrad-heading">
-            <h2 id="silrad-heading" class="h4">SILRAD Sysmon benchmark</h2>
-            <p class="small muted">RansomShield trains on SILRAD’s training split and evaluates its separate held-out test split. It does not train or evaluate on the same rows.</p>
-            <div class="d-flex flex-wrap align-items-center gap-3">
-                <button type="button" class="btn-brand" @click="performAction('/api/runs/silrad')" :disabled="busy || !silrad.ready">Run SILRAD held-out test</button>
-                <button type="button" class="btn-outline-custom" x-show="!silrad.ready && silrad.state !== 'preparing'" @click="prepareSilrad" :disabled="busy" x-text="silrad.state === 'failed' ? 'Retry server setup' : 'Prepare benchmark on server'"></button>
-                <span class="small muted" x-show="silrad.state === 'preparing'" role="status">Downloading SILRAD and training its benchmark model on the server. This can take a few minutes.</span>
-            </div>
-            <div class="small mt-3" x-show="silrad.state === 'failed'">
-                <p class="text-danger mb-0" x-text="silrad.error || 'Server setup failed. Check Render logs and retry.'"></p>
-            </div>
-            <div class="small mt-3" x-show="silrad.ready">
-                <p class="mb-1">Prepared on server · <span x-text="silrad.training_rows"></span> training events · <span x-text="silrad.test_rows"></span> held-out events · threshold <span x-text="silrad.threshold"></span></p>
-                <p class="mb-0">Current held-out recall: <strong x-text="metric(silrad.metrics?.recall)"></strong> · false negatives: <strong x-text="silrad.confusion_matrix?.fn"></strong></p>
-                <p class="text-danger mt-2 mb-0" x-show="silrad.metrics?.recall < 0.5">This model misses many ransomware-labeled events. Use it for this dataset experiment only; it is not connected to live monitoring.</p>
-            </div>
-            <details class="small mt-3"><summary>First-time setup</summary>
-                <p class="muted mt-2 mb-1">Select <strong>Prepare benchmark on server</strong> to download the published SILRAD files from <a href="https://github.com/JamilIsp/SILRAD-dataset" target="_blank" rel="noopener">the source repository</a> and prepare them here. Raw event text is not stored in run reports.</p>
-                <p class="muted mb-1">For local setup, run <code>.venv\Scripts\python.exe scripts\setup_silrad.py</code> from the project folder.</p>
-                <p class="muted mt-2 mb-0">Render may clear local files during redeploys. Select server setup again if the benchmark is no longer ready. This is a dataset experiment, not live endpoint detection.</p>
-            </details>
-        </section>
-
-        <section class="panel p-4 mb-4" aria-labelledby="runs-heading">
-            <h2 id="runs-heading" class="h4">Run history and incident reports</h2>
-            <p class="muted small">Refreshes every three seconds and after every run. Risk is the highest model probability in the run.</p>
-            <p x-show="!runs.length" class="muted">No runs yet. Run the SILRAD held-out benchmark above to see results here.</p>
-            <template x-for="run in runs" :key="run.id">
-                <article class="py-3 border-bottom" style="overflow-wrap:anywhere">
-                    <div class="d-flex flex-wrap justify-content-between gap-2"><strong x-text="run.kind + ' · ' + run.status"></strong><a :href="'/api/runs/' + run.id + '/report.csv'">Download CSV report</a></div>
-                    <div class="small muted">Run <code x-text="run.id"></code> · <span x-text="formatDate(run.created_at)"></span></div>
-                    <p class="small muted" x-show="run.result.transfer">Laptop transfer integrity: <span x-text="run.result.transfer?.integrity || 'pending'"></span> · SHA-256: <code x-text="run.result.transfer?.sha256 || ''"></code></p>
-                    <p class="small muted" x-show="run.result.transfer" x-text="run.result.transfer?.transport || ''"></p>
-                    <p class="small">Model: <strong x-text="run.result.model_name || 'No prediction'"></strong></p>
-                    <p class="my-2"><strong x-text="run.result.model_prediction || 'No prediction'"></strong> · Risk <span x-text="run.result.risk_score ?? '—'"></span>/100 · Incident <span x-text="run.incident?.id ?? 'None'"></span></p>
-                    <p class="small muted" x-show="run.result.dataset_schema === 'silrad'">SILRAD test events: <span x-text="run.result.windows"></span> · Precision: <span x-text="metric(run.result.metrics?.precision)"></span> · Recall: <span x-text="metric(run.result.metrics?.recall)"></span> · F1: <span x-text="metric(run.result.metrics?.f1)"></span> · False positives: <span x-text="run.result.confusion_matrix?.fp"></span></p>
-                    <a class="small" x-show="run.result.dataset_schema === 'silrad'" :href="'/api/runs/' + run.id + '/predictions.csv'">Download SILRAD row predictions</a>
-                    <p class="small" x-show="run.result.error" x-text="run.result.error"></p>
-                    <p class="small muted" x-show="run.result.observed_file_activity" x-text="'Recorded activity summary: ' + JSON.stringify(run.result.observed_file_activity || {})"></p>
-                    <template x-if="run.result.metrics"><p class="small muted">Accuracy <span x-text="metric(run.result.metrics.accuracy)"></span> · Precision <span x-text="metric(run.result.metrics.precision)"></span> · Recall <span x-text="metric(run.result.metrics.recall)"></span> · F1 <span x-text="metric(run.result.metrics.f1)"></span> · <span x-text="run.result.windows"></span> <span x-text="run.result.record_unit || 'windows'"></span></p></template>
-                    <template x-if="run.incident"><div class="small">
-                        <p x-text="run.incident.details"></p>
-                        <p>Quarantine: <strong x-text="run.incident.response?.quarantine || 'pending / incomplete'"></strong> · Email: <span x-text="run.incident.response?.notifications?.email || 'pending'"></span> · Webhook: <span x-text="run.incident.response?.notifications?.webhook || 'pending'"></span></p>
-                        <details><summary>Observed activity and file response details</summary><pre style="white-space:pre-wrap" x-text="JSON.stringify(run.incident.response?.files || [], null, 2)"></pre></details>
-                    </div></template>
-                    <details class="small muted" x-show="run.result.limitations"><summary>Evaluation limitations</summary><span x-text="(run.result.limitations || []).join(' ')"></span></details>
-                </article>
-            </template>
-        </section>
-        <div class="row g-4 mb-4">
+        <section id="panel-start" role="tabpanel" aria-labelledby="tab-start" x-show="activeTab === 'start'" x-cloak>
+        <div id="overview" class="row g-4 mb-4">
             <div class="col-sm-6 col-xl-3">
                 <article class="status-card">
                     <div class="d-flex justify-content-between"><span class="status-icon"><i class="bi bi-activity"></i></span><span class="state-badge" :class="status.running ? 'running' : ''"><span class="state-dot"></span><span x-text="status.connection_state"></span></span></div>
-                    <div class="metric-value mt-4" x-text="status.running ? 'Live' : 'Offline'"></div><span class="muted small">Hosted server monitor</span>
+                    <div class="metric-value mt-4" x-text="status.running ? 'Live' : 'Offline'"></div><span class="muted small">Application server monitor</span>
                 </article>
             </div>
             <div class="col-sm-6 col-xl-3">
                 <article class="status-card">
                     <div class="d-flex justify-content-between"><span class="status-icon"><i class="bi bi-cpu"></i></span><span class="state-badge" x-text="status.model_state"></span></div>
-                    <div class="metric-value mt-4"><span x-text="status.cpu_percent"></span><small class="fs-6">%</small></div><span class="muted small">Current CPU usage</span>
+                    <div class="metric-value mt-4"><span x-text="status.cpu_percent"></span><small class="fs-6">%</small></div><span class="muted small">Application host CPU usage</span>
                     <div class="progress-track mt-3"><div class="progress-value" :style="`width:${status.cpu_percent}%`"></div></div>
                 </article>
             </div>
             <div class="col-sm-6 col-xl-3">
                 <article class="status-card">
                     <div class="d-flex justify-content-between"><span class="status-icon"><i class="bi bi-collection"></i></span><span class="state-badge">Persisted</span></div>
-                    <div class="metric-value mt-4" x-text="eventCount"></div><span class="muted small">Behavioral events</span>
-                    <div class="small muted mt-2"><span x-text="status.process_count"></span> active processes</div>
+                    <div class="metric-value mt-4" x-text="eventCount"></div><span class="muted small">File activity events</span>
+                    <div class="small muted mt-2"><span x-text="status.process_count"></span> processes on application host</div>
                 </article>
             </div>
             <div class="col-sm-6 col-xl-3">
@@ -164,11 +97,122 @@
             </div>
         </div>
 
+
+        <section class="panel p-4 mb-4" aria-labelledby="guide-heading">
+            <span class="dashboard-section-kicker">Beginner guide</span>
+            <h2 id="guide-heading" class="h4 mt-1">How to use RansomShield</h2>
+            <p class="muted">For a safe test, use a disposable folder and files you can change.</p>
+            <ol class="small mb-0 ps-3">
+                <li>Open <strong>Monitor files</strong> and select a folder.</li>
+                <li>Create, edit, or delete a test file; wait up to five seconds.</li>
+                <li>Review the action and path under <strong>Recent activity</strong>, then stop monitoring.</li>
+            </ol>
+        </section>
+        <p class="small muted">SILRAD is a separate offline dataset test. A live activity alert asks for review; it does not confirm ransomware or quarantine files.</p>
+        </section>
+
+        <section id="panel-monitor" role="tabpanel" aria-labelledby="tab-monitor" x-show="activeTab === 'monitor'" x-cloak>
+        <div class="dashboard-section-heading mb-3"><div><span class="dashboard-section-kicker">File monitoring</span><h2 class="h4">Monitor files</h2><p class="small muted">Choose a folder on this computer or the app server.</p></div></div>
         <div class="row g-4 mb-4">
-            <div class="col-lg-8">
-                <section class="panel h-100">
+            <div class="col-lg-6">
+                <section class="panel p-4 h-100" aria-labelledby="device-folder-heading">
+                    <span class="dashboard-section-kicker">This computer · browser access</span>
+                    <h3 id="device-folder-heading" class="h5 mt-1">Watch a folder on this device</h3>
+                    <p class="small muted">Select a safe test folder. Keep this page open while monitoring.</p>
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        <button class="btn-brand" type="button" @click="chooseFolder" :disabled="folderBusy || folderWatching"><i class="bi bi-folder2-open me-2"></i>Choose folder</button>
+                        <button class="btn-outline-custom" type="button" @click="stopFolderWatch" :disabled="!folderWatching"><i class="bi bi-stop-fill me-2"></i>Stop</button>
+                    </div>
+                    <div class="mt-3"><span class="state-badge" :class="folderWatching ? 'running' : ''"><span class="state-dot"></span><span x-text="folderWatching ? 'Watching in this browser' : 'Not watching'"></span></span></div>
+                    <p class="small mt-3 mb-0" :class="folderMessageType === 'error' ? 'text-danger' : 'muted'" x-text="folderMessage || 'Choose a folder to begin. Browser support notes are below.'" role="status"></p>
+                    <p class="small muted mt-2 mb-0" x-show="folderName">Folder: <strong x-text="folderName"></strong> · <span x-text="folderFileCount"></span> files</p>
+                    <details class="small mt-3"><summary>Browser support and privacy</summary><p class="muted mt-2 mb-0">This feature needs the browser’s folder-access API. The page checks every five seconds and sends file paths and basic metadata, not file contents. Brave may disable the API; Chrome or Edge is the simplest option.</p></details>
+                </section>
+            </div>
+            <div class="col-lg-6">
+                <section class="panel p-4 h-100" aria-labelledby="server-monitor-heading">
+                    <span class="dashboard-section-kicker">Application server</span>
+                    <h3 id="server-monitor-heading" class="h5 mt-1">Watch the server folder</h3>
+                    <p class="small muted">This watches the folder on the computer running the app. It is not the folder picker for this device.</p>
+                    <div class="safe-note mb-3"><span class="small muted d-block">Folder being watched</span><code class="text-break" style="color:var(--text)" x-text="status.target"></code></div>
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        <button class="btn-brand" type="button" @click="startMonitor" :disabled="busy || status.running"><i class="bi bi-play-fill me-2"></i>Start server monitor</button>
+                        <button class="btn-outline-custom" type="button" @click="stopMonitor" :disabled="busy || !status.running"><i class="bi bi-stop-fill me-2"></i>Stop server monitor</button>
+                        <span class="state-badge" :class="status.running ? 'running' : ''" x-text="status.connection_state"></span>
+                    </div>
+                    <div class="monitor-stats mt-4">
+                        <div><span>Files currently in folder</span><strong x-text="status.monitored_files || 0"></strong></div>
+                        <div><span>Last changes</span><strong><span x-text="status.last_activity?.files_touched || 0"></span> files</strong></div>
+                        <div><span>Change rate</span><strong><span x-text="status.last_activity?.operation_rate || 0"></span>/sec</strong></div>
+                        <div><span>Last scan</span><strong x-text="status.last_successful_scan ? formatDate(status.last_successful_scan) : 'Not started'"></strong></div>
+                    </div>
+                </section>
+            </div>
+        </div>
+        <p class="small muted mb-3">Alert rule: 10 deletions, 20 modifications, or 30 changed files with at least 10 modifications/deletions in 30 seconds. Alerts ask for review and do not move files.</p>
+
+
+
+        </section>
+
+        <section id="panel-benchmark" role="tabpanel" aria-labelledby="tab-benchmark" x-show="activeTab === 'benchmark'" x-cloak>
+        <section class="panel p-4 mb-4" aria-labelledby="silrad-heading">
+            <h2 id="silrad-heading" class="h4">SILRAD held-out benchmark</h2>
+            <p class="small muted">This offline benchmark evaluates SILRAD’s published, labeled Sysmon events with an incremental Adaptive Random Forest. It predicts each test event before learning that row’s known label for the next event. The benchmark does not power live folder alerts.</p>
+            <div class="d-flex flex-wrap align-items-center gap-3">
+                <button type="button" class="btn-brand" @click="performAction('/api/runs/silrad')" :disabled="busy || !silrad.ready">Run held-out test</button>
+                <button type="button" class="btn-outline-custom" x-show="!silrad.ready && silrad.state !== 'preparing'" @click="prepareSilrad" :disabled="busy" x-text="silrad.state === 'failed' ? 'Retry data preparation' : 'Prepare SILRAD data'"></button>
+                <span class="small muted" x-show="silrad.state === 'preparing'" role="status">Downloading published benchmark data and training the model on the server. This can take a few minutes.</span>
+            </div>
+            <div class="small mt-3" x-show="silrad.state === 'failed'">
+                <p class="text-danger mb-0" x-text="silrad.error || 'Could not prepare the benchmark. Check the application logs and retry.'"></p>
+            </div>
+            <div class="small mt-3" x-show="silrad.ready">
+                <p class="mb-1">Prepared on server · <span x-text="silrad.training_rows"></span> training events · <span x-text="silrad.test_rows"></span> test-stream events · training-only threshold <span x-text="silrad.threshold"></span></p>
+                <p class="mb-1">Prequential online recall: <strong x-text="metric(silrad.metrics?.recall)"></strong> · false negatives: <strong x-text="silrad.confusion_matrix?.fn"></strong> · false positives: <strong x-text="silrad.confusion_matrix?.fp"></strong></p>
+                <p class="small muted mb-0" x-show="silrad.frozen_model_evaluation?.metrics">Frozen-model recall (no updates): <strong x-text="metric(silrad.frozen_model_evaluation?.metrics?.recall)"></strong>.</p>
+                <p class="small muted mb-0" x-show="silrad.xgboost_comparison?.metrics">Static XGBoost comparison (different learning method): recall <strong x-text="metric(silrad.xgboost_comparison?.metrics?.recall)"></strong> · false positives: <strong x-text="silrad.xgboost_comparison?.confusion_matrix?.fp"></strong> · threshold <span x-text="silrad.xgboost_comparison?.threshold"></span></p>
+                <p class="text-danger mt-2 mb-0" x-show="silrad.metrics?.recall < 0.5">This model misses many ransomware-labeled events. Use it for this dataset experiment only; it is not connected to live monitoring.</p>
+            </div>
+            <details class="small mt-3"><summary>About this benchmark</summary>
+                <p class="muted mt-2 mb-1">Select <strong>Prepare SILRAD data</strong> to download the published dataset from <a href="https://github.com/JamilIsp/SILRAD-dataset" target="_blank" rel="noopener">its source repository</a>. Threshold selection uses training data only. The test predicts each row before using its known dataset label to update the next prediction. This is a labeled offline experiment, not proof of live endpoint detection. Raw event text is not stored in run reports.</p>
+                <p class="muted mb-1">For local setup, run <code>.venv\Scripts\python.exe scripts\setup_silrad.py</code> from the project folder.</p>
+                <p class="muted mt-2 mb-0">On a hosted service without persistent storage, prepare the dataset again if a redeploy removes local files.</p>
+            </details>
+        </section>
+
+        <section class="panel p-4 mb-4" aria-labelledby="runs-heading">
+            <h2 id="runs-heading" class="h4">Run history and incident reports</h2>
+            <p class="muted small">Refreshes every three seconds and after every run. A run’s risk score is its highest event score; model scores are not calibrated infection probabilities.</p>
+            <p x-show="!runs.length" class="muted">No runs yet. Prepare and run the SILRAD benchmark above to see results here.</p>
+            <template x-for="run in runs" :key="run.id">
+                <article class="py-3 border-bottom" style="overflow-wrap:anywhere">
+                    <div class="d-flex flex-wrap justify-content-between gap-2"><strong x-text="run.kind + ' · ' + run.status"></strong><a :href="'/api/runs/' + run.id + '/report.csv'">Download CSV report</a></div>
+                    <div class="small muted">Run <code x-text="run.id"></code> · <span x-text="formatDate(run.created_at)"></span></div>
+                    <p class="small muted" x-show="run.result.transfer">Laptop transfer integrity: <span x-text="run.result.transfer?.integrity || 'pending'"></span> · SHA-256: <code x-text="run.result.transfer?.sha256 || ''"></code></p>
+                    <p class="small muted" x-show="run.result.transfer" x-text="run.result.transfer?.transport || ''"></p>
+                    <p class="small">Model: <strong x-text="run.result.model_name || 'No prediction'"></strong></p>
+                    <p class="my-2"><strong x-text="run.result.model_prediction || 'No prediction'"></strong> · Risk <span x-text="run.result.risk_score ?? '—'"></span>/100 · Incident <span x-text="run.incident?.id ?? 'None'"></span></p>
+                    <p class="small muted" x-show="run.result.dataset_schema === 'silrad'">Benchmark test events: <span x-text="run.result.windows"></span> · Precision: <span x-text="metric(run.result.metrics?.precision)"></span> · Recall: <span x-text="metric(run.result.metrics?.recall)"></span> · F1: <span x-text="metric(run.result.metrics?.f1)"></span> · False positives: <span x-text="run.result.confusion_matrix?.fp"></span></p>
+                    <a class="small" x-show="run.result.dataset_schema === 'silrad'" :href="'/api/runs/' + run.id + '/predictions.csv'">Download benchmark row predictions</a>
+                    <p class="small" x-show="run.result.error" x-text="run.result.error"></p>
+                    <p class="small muted" x-show="run.result.observed_file_activity" x-text="'Recorded activity summary: ' + JSON.stringify(run.result.observed_file_activity || {})"></p>
+                    <template x-if="run.result.metrics"><p class="small muted">Accuracy <span x-text="metric(run.result.metrics.accuracy)"></span> · Precision <span x-text="metric(run.result.metrics.precision)"></span> · Recall <span x-text="metric(run.result.metrics.recall)"></span> · F1 <span x-text="metric(run.result.metrics.f1)"></span> · <span x-text="run.result.windows"></span> <span x-text="run.result.record_unit || 'windows'"></span></p></template>
+                    <template x-if="run.incident"><div class="small">
+                        <p x-text="run.incident.details"></p>
+                        <p>Quarantine: <strong x-text="run.incident.response?.quarantine || 'pending / incomplete'"></strong> · Email: <span x-text="run.incident.response?.notifications?.email || 'pending'"></span> · Webhook: <span x-text="run.incident.response?.notifications?.webhook || 'pending'"></span></p>
+                        <details><summary>Observed activity and file response details</summary><pre style="white-space:pre-wrap" x-text="JSON.stringify(run.incident.response?.files || [], null, 2)"></pre></details>
+                    </div></template>
+                    <details class="small muted" x-show="run.result.limitations"><summary>Evaluation limitations</summary><span x-text="(run.result.limitations || []).join(' ')"></span></details>
+                </article>
+            </template>
+        </section>
+        </section>
+
+        <div x-show="activeTab === 'monitor'" x-cloak>
+        <section class="panel mb-4">
                     <div class="p-4 d-flex justify-content-between align-items-start border-bottom" style="border-color:var(--line)!important">
-                        <div><small class="muted">LIVE ACTIVITY</small><h2 class="h4 mt-1 mb-1">Monitoring events</h2><span class="muted small">Updated automatically every few seconds</span></div>
+                        <div><small class="muted">RECENT CHANGES</small><h2 id="events-heading" class="h4 mt-1 mb-1">Recent activity</h2><span class="muted small">Updated automatically every few seconds</span></div>
                         <button class="theme-toggle" type="button" @click="refreshAll" :disabled="busy" aria-label="Refresh data"><i class="bi bi-arrow-clockwise" :class="busy ? 'd-inline-block spin' : ''"></i></button>
                     </div>
 
@@ -176,54 +220,71 @@
                         <template x-for="event in events" :key="event.id">
                             <article class="feed-row">
                                 <span class="feed-icon" :class="event.severity"><i class="bi" :class="event.severity === 'warning' ? 'bi-exclamation-triangle' : 'bi-folder-check'"></i></span>
-                                <div><strong class="d-block" x-text="event.event_type.replaceAll('_', ' ')"></strong><p class="muted small mb-1" x-text="event.details"></p><span class="muted" style="font-size:.72rem" x-text="formatDate(event.created_at)"></span></div>
-                                <span class="state-badge" x-text="`activity ${event.risk_score}/100`"></span>
+                                <div class="activity-event-content">
+                                    <strong class="d-block" x-text="event.event_type === 'file_activity' ? 'File changes detected' : event.event_type.replaceAll('_', ' ')"></strong>
+                                    <p class="muted small mb-2" x-text="eventSummary(event)"></p>
+                                    <div class="activity-file-list" x-show="eventFiles(event).length">
+                                        <div class="activity-file-heading"><span>Action</span><span>File path (inside monitored folder)</span></div>
+                                        <template x-for="file in eventFiles(event).slice(0, 10)" :key="`${file.operation}:${file.path}`">
+                                            <div class="activity-file-row">
+                                                <span class="activity-action" :class="`action-${file.operation}`" x-text="file.operation"></span>
+                                                <code x-text="file.path"></code>
+                                            </div>
+                                        </template>
+                                        <details class="activity-more-files" x-show="eventFiles(event).length > 10">
+                                            <summary x-text="`Show ${eventFiles(event).length - 10} more file changes`"></summary>
+                                            <template x-for="file in eventFiles(event).slice(10)" :key="`${file.operation}:${file.path}`">
+                                                <div class="activity-file-row">
+                                                    <span class="activity-action" :class="`action-${file.operation}`" x-text="file.operation"></span>
+                                                    <code x-text="file.path"></code>
+                                                </div>
+                                            </template>
+                                        </details>
+                                        <p class="activity-truncation-note" x-show="eventUsesLegacyFormat(event) && event.details.length >= 500">This older event was cut off when it was saved, so the list may not include every changed file.</p>
+                                    </div>
+                                    <span class="muted d-block mt-2" style="font-size:.72rem" x-text="formatDate(event.created_at)"></span>
+                                </div>
+                                <span class="state-badge" x-text="event.severity === 'warning' ? 'Review activity' : 'Activity recorded'"></span>
                             </article>
                         </template>
                     </div>
 
                     <div class="empty-state" x-show="!events.length">
-                        <div><span class="status-icon mx-auto mb-3"><i class="bi bi-inbox"></i></span><h3 class="h5">No events recorded</h3><p class="muted small mb-0">Choose a folder on this device above, or start the hosted server-folder monitor.</p></div>
+                        <div><span class="status-icon mx-auto mb-3"><i class="bi bi-inbox"></i></span><h3 class="h5">No events recorded</h3><p class="muted small mb-0">Choose a folder on this device above, or start the app-server folder monitor.</p></div>
                     </div>
                 </section>
-            </div>
-
-            <div class="col-lg-4">
-                <section class="panel p-4 h-100">
-                    <small class="muted">HOSTED SERVER DIRECTORY</small><h2 class="h4 mt-1">Server filesystem activity</h2>
-                    <p class="muted small">This section reports the application server’s configured directory. To watch a folder on this device, use <strong>Monitor a folder on this device</strong> above. Live alerts use a rolling 30-second rule: 10 deletions, 20 modifications, or 30 distinct changed files with at least 10 modified or deleted. The score is an activity heuristic, not a ransomware probability.</p>
-                    <p class="muted small">A burst alert asks for review; it does not identify malware. Automatic quarantine is disabled for these rule-based alerts.</p>
-                    <div class="safe-note mt-3"><i class="bi bi-folder2-open me-2" style="color:var(--accent)"></i><code style="color:var(--text)" x-text="status.target"></code></div>
-                    <hr class="my-4" style="border-color:var(--line)">
-                    <div class="d-flex justify-content-between mb-3"><span class="muted small">Last file burst</span><strong class="small"><span x-text="status.last_activity?.files_touched || 0"></span> files</strong></div>
-                    <div class="d-flex justify-content-between mb-3"><span class="muted small">Operation rate</span><strong class="small"><span x-text="status.last_activity?.operation_rate || 0"></span>/s</strong></div>
-                    <div class="d-flex justify-content-between mb-3"><span class="muted small">Directories touched</span><strong class="small" x-text="status.last_activity?.directories_touched || 0"></strong></div>
-                    <div class="d-flex justify-content-between mb-3"><span class="muted small">Memory usage</span><strong class="small"><span x-text="status.memory_percent"></span>%</strong></div>
-                    <div class="progress-track"><div class="progress-value" :style="`width:${status.memory_percent}%`"></div></div>
-                    <div class="d-flex justify-content-between mt-4"><span class="muted small">Last system check</span><strong class="small" x-text="status.last_check ? formatDate(status.last_check) : 'Not started'"></strong></div>
-                    <div class="d-flex justify-content-between mt-3"><span class="muted small">Collector</span><strong class="small" x-text="status.collector === 'watchdog' ? 'Windows events' : 'Snapshot polling'"></strong></div>
-                    <div class="d-flex justify-content-between mt-3"><span class="muted small">Dropped events</span><strong class="small" :style="status.dropped_events ? 'color:var(--accent)' : ''" x-text="status.dropped_events || 0"></strong></div>
-                    <div class="d-flex justify-content-between mt-3"><span class="muted small">Last successful scan</span><strong class="small" x-text="status.last_successful_scan ? formatDate(status.last_successful_scan) : 'Not started'"></strong></div>
-                    <div class="d-flex justify-content-between mt-3"><span class="muted small">Polling interval</span><strong class="small"><span x-text="status.interval_seconds"></span> seconds</strong></div>
-                </section>
-            </div>
         </div>
 
+        <section id="panel-alerts" role="tabpanel" aria-labelledby="tab-alerts" x-show="activeTab === 'alerts'" x-cloak>
         <section class="panel">
-            <div class="p-4 border-bottom" style="border-color:var(--line)!important"><small class="muted">ALERT REVIEW</small><h2 class="h4 mt-1 mb-0">Detected activity alerts</h2></div>
+            <div class="p-4 border-bottom d-flex flex-wrap justify-content-between align-items-center gap-2" style="border-color:var(--line)!important"><div><small class="muted">ALERT REVIEW</small><h2 id="alerts-heading" class="h4 mt-1 mb-0">Detected activity alerts</h2></div><div class="d-flex gap-2"><label class="small">State <select class="form-select form-select-sm d-inline-block w-auto ms-1" x-model="alertFilter" @change="loadAlerts"><option value="open">Open</option><option value="resolved">Resolved</option><option value="all">All</option></select></label><label class="small">Severity <select class="form-select form-select-sm d-inline-block w-auto ms-1" x-model="severityFilter" @change="loadAlerts"><option value="">All</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option></select></label></div></div>
             <div class="px-4" x-show="alerts.length">
                 <template x-for="alert in alerts" :key="alert.id">
                     <article class="feed-row">
                         <span class="feed-icon" :class="alert.severity"><i class="bi bi-shield-exclamation"></i></span>
                         <div>
                             <strong class="d-block" x-text="alert.title"></strong>
-                            <p class="small mb-1">Incident #<span x-text="alert.id"></span> · <span x-show="alert.model_version?.startsWith('rolling-file-burst')">Activity score <span x-text="alert.risk_score"></span>/100 · Rule-based anomaly; review required.</span><span x-show="!alert.model_version?.startsWith('rolling-file-burst')">Dataset evaluation flagged records; score <span x-text="alert.risk_score"></span>/100. This refers to the uploaded CSV, not your computer.</span> · <a :href="'/api/alerts/' + alert.id + '/report.csv'">Download CSV</a></p>
+                            <p class="small mb-1">Incident #<span x-text="alert.id"></span> · <span x-show="isLiveActivityAlert(alert)">Activity score <span x-text="alert.risk_score"></span>/100 · Rule-based anomaly; review required.</span><span x-show="!isLiveActivityAlert(alert)">Dataset evaluation flagged records; score <span x-text="alert.risk_score"></span>/100. This refers to the evaluated CSV, not your computer.</span> · <a :href="'/api/alerts/' + alert.id + '/report.csv'">Download CSV</a></p>
                             <p class="muted small mb-1" x-text="alert.details"></p>
+                            <details class="small mb-2" x-show="(alert.rule_trace || []).some(item => item.signal === 'affected_files' && item.value?.length)">
+                                <summary>Changed files (paths relative to monitored folder)</summary>
+                                <div class="table-responsive mt-2">
+                                    <table class="table table-sm align-middle mb-0">
+                                        <thead><tr><th scope="col">Activity</th><th scope="col">Path</th></tr></thead>
+                                        <tbody>
+                                            <template x-for="file in (((alert.rule_trace || []).find(item => item.signal === 'affected_files') || {}).value || [])" :key="file.path">
+                                                <tr><td x-text="(file.operations || ['changed']).join(', ')"></td><td class="text-break" x-text="file.path"></td></tr>
+                                            </template>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </details>
                             <template x-if="alert.response">
                                 <div class="small mt-2">
-                                    <strong x-text="alert.response.completed ? 'Automated response processed' : 'Response incomplete — review required'"></strong>
+                                    <strong x-text="alert.response.completed ? 'Response attempt recorded' : 'Response incomplete — review required'"></strong>
                                     <p class="mb-1" x-text="`${(alert.response.files || []).filter(f => f.status === 'quarantined').length} files quarantined; ${(alert.response.files || []).filter(f => f.status === 'failed').length} files could not be moved.${alert.response.quarantine === 'disabled' ? ' Quarantine disabled.' : ''}`"></p>
-                                    <p class="muted mb-1" x-text="Object.entries(alert.response.notifications || {}).map(([name, state]) => `${name}: ${state}`).join(' · ')"></p>
+                                    <p class="muted mb-1" x-text="Object.entries(alert.response.notifications || {}).map(([name, state]) => `${name}: ${name === 'email' && state === 'sent' ? 'accepted by SMTP' : state}`).join(' · ')"></p>
+                                    <button class="btn-outline-custom btn-sm py-1 px-2 mb-2" type="button" x-show="alert.response.notifications?.email === 'failed'" @click="retryAlertEmail(alert.id)" :disabled="busy">Retry email</button>
                                     <details x-show="(alert.response.files || []).length">
                                         <summary>File response details</summary>
                                         <template x-for="file in alert.response.files || []" :key="file.source">
@@ -232,15 +293,26 @@
                                     </details>
                                 </div>
                             </template>
-                            <span class="muted" style="font-size:.72rem" x-text="formatDate(alert.created_at)"></span>
+                            <span class="muted" style="font-size:.72rem" x-text="alert.resolved_at ? `Resolved ${formatDate(alert.resolved_at)}` : `Created ${formatDate(alert.created_at)}`"></span>
                         </div>
-                        <button class="btn-outline-custom py-2 px-3" type="button" @click="acknowledgeAlert(alert.id)" :disabled="alert.acknowledged" x-text="alert.acknowledged ? 'Reviewed' : 'Acknowledge'"></button>
+                        <div class="d-flex flex-column gap-2"><button class="btn-outline-custom py-2 px-3" type="button" @click="acknowledgeAlert(alert.id)" :disabled="alert.acknowledged || alert.resolved_at" x-text="alert.acknowledged ? 'Reviewed' : 'Acknowledge'"></button><button class="btn-outline-custom py-2 px-3" type="button" @click="resolveAlert(alert.id)" :disabled="busy || alert.resolved_at" x-text="alert.resolved_at ? 'Resolved' : 'Resolve'"></button></div>
                     </article>
                 </template>
             </div>
             <div class="empty-state" x-show="!alerts.length"><div><span class="status-icon mx-auto mb-3"><i class="bi bi-shield-check"></i></span><h3 class="h5">No alerts</h3><p class="muted small mb-0">Alerts appear when the rolling file-change rules cross their configured burst thresholds.</p></div></div>
         </section>
+        </section>
 
+        <section id="panel-account" role="tabpanel" aria-labelledby="tab-account" x-show="activeTab === 'account'" x-cloak>
+        <section class="panel p-4 mb-4" id="email-settings" aria-labelledby="email-status-heading">
+            <div class="d-flex flex-wrap justify-content-between align-items-start gap-2"><div><h2 id="email-status-heading" class="h4">Email alerts</h2><p class="small muted mb-1">Status: <strong x-text="notificationStatus.email || 'checking'">checking</strong> · Recipient: <strong x-text="notificationStatus.email_recipient || 'your signed-in account'">your signed-in account</strong></p></div><button class="btn-outline-custom py-2 px-3" type="button" @click="toggleEmailNotifications" :disabled="busy" x-text="notificationStatus.email_enabled ? 'Turn off email alerts' : 'Turn on email alerts'"></button></div>
+            <p class="small muted mb-0">A sent status means the SMTP server accepted the email, not that it reached the inbox. Check Spam if missing. Failed alert emails can be retried from the alert. SMTP server details are changed in the project <code>.env</code> file and need an app restart; secrets are not shown here.</p>
+        </section>
+        <section class="panel mt-4">
+            <div class="p-4 border-bottom d-flex justify-content-between align-items-center" style="border-color:var(--line)!important"><div><small class="muted">ACCOUNT HISTORY</small><h2 id="audit-heading" class="h4 mt-1 mb-0">Audit history</h2><span class="muted small">Sign-ins, monitoring actions, analyses, folder activity, and alert actions</span></div><button class="theme-toggle" type="button" @click="loadAudit" aria-label="Refresh audit history"><i class="bi bi-arrow-clockwise"></i></button></div>
+            <div class="px-4" x-show="auditEntries.length"><template x-for="entry in auditEntries" :key="entry.id"><article class="feed-row"><span class="feed-icon"><i class="bi bi-journal-text"></i></span><div><strong class="d-block" x-text="entry.action.replaceAll('_', ' ')"></strong><p class="muted small mb-1" x-text="formatDetails(entry.details)"></p><span class="muted" style="font-size:.72rem" x-text="formatDate(entry.created_at)"></span></div></article></template></div>
+            <div class="empty-state" x-show="!auditEntries.length"><div><h3 class="h6">No audit entries yet</h3><p class="muted small mb-0">Actions will appear here as you use monitoring, analysis, and alert controls.</p></div></div>
+        </section>
         <section class="panel mt-4">
             <div class="p-4 border-bottom d-flex flex-wrap justify-content-between align-items-center gap-2" style="border-color:var(--line)!important">
                 <div><small class="muted">QUARANTINE HISTORY</small><h2 class="h4 mt-1 mb-0">Previously contained files</h2></div>
@@ -262,6 +334,7 @@
             </div>
             <div class="empty-state" x-show="!quarantine.length"><div><span class="status-icon mx-auto mb-3"><i class="bi bi-archive"></i></span><h3 class="h5">No quarantine records</h3><p class="muted small mb-0">Live activity and CSV evaluations are currently review-only and do not move files.</p></div></div>
         </section>
+        </section>
     </div>
 </main>
 {% endblock %}
@@ -271,6 +344,7 @@
     function monitorDashboard() {
         return {
             csrfToken: document.querySelector('meta[name="csrf-token"]').content,
+            activeTab: 'start',
             busy: false,
             feedback: '',
             feedbackType: 'info',
@@ -278,6 +352,10 @@
             alertCount: 0,
             events: [],
             alerts: [],
+            alertFilter: 'open',
+            severityFilter: '',
+            auditEntries: [],
+            notificationStatus: {email: 'checking', email_recipient: 'your signed-in account'},
             runs: [],
             quarantine: [],
             silrad: {ready: false, state: 'idle'},
@@ -315,6 +393,35 @@
                 window.clearInterval(this.refreshTimer);
                 this.stopFolderWatch();
             },
+            isLiveActivityAlert(alert) {
+                return ["rolling-file-burst", "browser-folder-burst", "endpoint-agent-burst"]
+                    .some(prefix => alert.model_version?.startsWith(prefix));
+            },
+            eventUsesLegacyFormat(event) {
+                return event.event_type === 'file_activity'
+                    && !(event.file_activity || []).length
+                    && event.details?.startsWith('Observed ');
+            },
+            eventSummary(event) {
+                if (!this.eventUsesLegacyFormat(event)) return event.details || 'File activity recorded.';
+                const match = event.details.match(/^Observed (\d+) monitored-directory changes \((\d+) created, (\d+) modified, (\d+) deleted; ([\d.]+) operations\/s\)\./);
+                if (!match) return event.details;
+                return `${match[1]} file changes: ${match[2]} created, ${match[3]} modified, ${match[4]} deleted. Detected at ${match[5]} changes per second.`;
+            },
+            eventFiles(event) {
+                if ((event.file_activity || []).length) return event.file_activity;
+                if (!this.eventUsesLegacyFormat(event)) return [];
+                const marker = 'Files (paths relative to monitored folder): ';
+                const start = event.details.indexOf(marker);
+                if (start < 0) return [];
+                const pathText = event.details.slice(start + marker.length);
+                const files = [];
+                const expression = /(?:^|; )(created|modified|deleted): (.*?)(?=; (?:created|modified|deleted): |$)/g;
+                for (const match of pathText.matchAll(expression)) {
+                    files.push({operation: match[1], path: match[2]});
+                }
+                return files;
+            },
             async fetchJson(url, options = {}) {
                 const headers = {Accept: 'application/json', ...(options.headers || {})};
                 if ((options.method || 'GET') !== 'GET') headers['X-CSRFToken'] = this.csrfToken;
@@ -330,14 +437,16 @@
             async refreshAll(showBusy = true) {
                 if (showBusy) this.busy = true;
                 try {
-                    const [summary, eventData, alertData, runData, quarantineData, silradData] = await Promise.all([
+                    const [summary, eventData, runData, quarantineData, silradData, auditData, notificationData] = await Promise.all([
                         this.fetchJson('{{ url_for("api.monitor_status") }}'),
                         this.fetchJson('{{ url_for("api.list_events", limit=12) }}'),
-                        this.fetchJson('{{ url_for("api.list_alerts", limit=8) }}'),
                         this.fetchJson('/api/runs'),
                         this.fetchJson('/api/quarantine'),
-                        this.fetchJson('/api/silrad/status')
+                        this.fetchJson('/api/silrad/status'),
+                        this.fetchJson('/api/audit?limit=30'),
+                        this.fetchJson('/api/notifications')
                     ]);
+                    const alertData = await this.fetchJson(this.alertQuery());
                     this.status = summary.status;
                     this.eventCount = summary.event_count;
                     this.alertCount = summary.alert_count;
@@ -346,16 +455,18 @@
                     this.runs = runData.runs;
                     this.quarantine = quarantineData.items;
                     this.silrad = silradData;
+                    this.auditEntries = auditData.entries;
+                    this.notificationStatus = notificationData;
                 } catch (error) {
                     this.showFeedback(error.message, 'error');
                 } finally {
                     if (showBusy) this.busy = false;
                 }
             },
-            async performAction(url) {
+            async performAction(url, options = {method: 'POST'}) {
                 this.busy = true;
                 try {
-                    const data = await this.fetchJson(url, {method: 'POST'});
+                    const data = await this.fetchJson(url, options);
                     this.showFeedback(data.message, data.ok ? 'info' : 'error');
                     await this.refreshAll(false);
                     return data;
@@ -368,8 +479,15 @@
             },
             startMonitor() { return this.performAction('{{ url_for("api.start_monitor") }}'); },
             async chooseFolder() {
-                if (!window.isSecureContext || typeof window.showDirectoryPicker !== 'function') {
-                    this.folderMessage = 'Folder monitoring requires Chrome or Edge on HTTPS (or localhost).';
+                if (!window.isSecureContext) {
+                    this.folderMessage = 'Folder selection requires a secure page: use localhost or HTTPS.';
+                    this.folderMessageType = 'error';
+                    return;
+                }
+                if (typeof window.showDirectoryPicker !== 'function') {
+                    this.folderMessage = navigator.brave
+                        ? 'Brave has disabled this folder-picker feature. Use Chrome/Edge, or enable Brave’s experimental File System Access API flag and relaunch.'
+                        : 'This browser does not support the folder picker needed for monitoring. Use a recent Chrome or Edge browser.';
                     this.folderMessageType = 'error';
                     return;
                 }
@@ -467,6 +585,35 @@
             async acknowledgeAlert(alertId) {
                 await this.performAction(`/api/alerts/${alertId}/acknowledge`);
             },
+            async resolveAlert(alertId) {
+                await this.performAction(`/api/alerts/${alertId}/resolve`);
+            },
+            async retryAlertEmail(alertId) {
+                await this.performAction(`/api/alerts/${alertId}/retry-email`);
+            },
+            async toggleEmailNotifications() {
+                const enabled = !this.notificationStatus.email_enabled;
+                await this.performAction('/api/notifications/email', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({enabled})
+                });
+            },
+            async loadAlerts() {
+                try {
+                    const data = await this.fetchJson(this.alertQuery());
+                    this.alerts = data.alerts;
+                } catch (error) { this.showFeedback(error.message, 'error'); }
+            },
+            alertQuery() {
+                const params = new URLSearchParams({limit: '8', status: this.alertFilter});
+                if (this.severityFilter) params.set('severity', this.severityFilter);
+                return `/api/alerts?${params.toString()}`;
+            },
+            async loadAudit() {
+                try { this.auditEntries = (await this.fetchJson('/api/audit?limit=30')).entries; }
+                catch (error) { this.showFeedback(error.message, 'error'); }
+            },
             async loadQuarantine() {
                 try {
                     const data = await this.fetchJson('/api/quarantine');
@@ -486,6 +633,12 @@
             formatDate(value) {
                 if (!value) return 'Not available';
                 return new Intl.DateTimeFormat(undefined, {dateStyle: 'medium', timeStyle: 'short'}).format(new Date(value));
+            },
+            formatDetails(details) {
+                return Object.entries(details || {}).map(([key, value]) => {
+                    const readableValue = value && typeof value === 'object' ? JSON.stringify(value) : value;
+                    return `${key.replaceAll('_', ' ')}: ${readableValue}`;
+                }).join(' · ');
             }
         };
     }

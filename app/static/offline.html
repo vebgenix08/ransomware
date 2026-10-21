@@ -3,21 +3,41 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#151713">
-  <title>Offline | RansomShield</title>
+  <meta name="theme-color" content="#f5f3ed">
+  <meta name="description" content="RansomShield needs a network connection to load your workspace.">
+  <title>Connection unavailable | RansomShield</title>
   <style>
-    :root { color-scheme: dark; font: 16px/1.6 system-ui, sans-serif; background: #151713; color: #f2f0e9; }
-    body { min-height: 100vh; margin: 0; display: grid; place-items: center; }
-    main { max-width: 34rem; padding: 2rem; }
-    h1 { margin-bottom: .5rem; color: #a8c9b1; }
-    p { color: #a9afa2; }
-    a { display: inline-block; margin-top: 1rem; color: #151713; background: #86b394; padding: .75rem 1rem; border-radius: .6rem; text-decoration: none; font-weight: 700; }
+    :root { color-scheme: light; font: 16px/1.6 "Segoe UI", system-ui, sans-serif; background: #f5f3ed; color: #20231e; }
+    * { box-sizing: border-box; }
+    body { min-height: 100vh; margin: 0; display: grid; place-items: center; padding: 1.25rem; }
+    main { width: min(100%, 34rem); padding: clamp(1.5rem, 5vw, 2.5rem); border: 1px solid #dcd8cd; border-radius: 1.15rem; background: #fffdf8; }
+    .brand { display: flex; align-items: center; gap: .7rem; color: #20231e; font-weight: 800; letter-spacing: -.035em; }
+    .brand-mark { width: 2.5rem; height: 2.5rem; display: grid; place-items: center; color: #fff; border-radius: .7rem; background: #234633; }
+    .eyebrow { margin-top: 2.25rem; color: #315c43; font-size: .72rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+    h1 { margin: .45rem 0 .65rem; font-size: clamp(1.8rem, 7vw, 2.5rem); line-height: 1.1; letter-spacing: -.06em; }
+    p { color: #686d63; }
+    .note { padding: .85rem 1rem; border-left: 3px solid #b7792a; background: #f4e6d0; font-size: .88rem; }
+    a { display: inline-flex; align-items: center; justify-content: center; margin-top: 1rem; padding: .75rem 1rem; color: #fff; border-radius: .55rem; background: #234633; text-decoration: none; font-weight: 700; }
+    a:focus-visible { outline: 3px solid #315c43; outline-offset: 3px; }
+    @media (prefers-color-scheme: dark) {
+      :root { color-scheme: dark; background: #151713; color: #f2f0e9; }
+      main { border-color: #363d32; background: #1d211b; }
+      .brand { color: #f2f0e9; }
+      .brand-mark { color: #172019; background: #a8c9b1; }
+      .eyebrow { color: #a8c9b1; }
+      p { color: #a9afa2; }
+      .note { color: #f2f0e9; border-color: #d8a45c; background: #44351f; }
+      a { color: #172019; background: #a8c9b1; }
+    }
   </style>
 </head>
 <body>
   <main>
-    <h1>RansomShield is offline</h1>
-    <p>Your dashboard and account data are not stored for offline access. Reconnect to continue monitoring or review run evidence.</p>
+    <div class="brand"><span class="brand-mark" aria-hidden="true">R</span><span>RansomShield</span></div>
+    <div class="eyebrow">Connection unavailable</div>
+    <h1>Your workspace needs a connection.</h1>
+    <p>RansomShield does not save dashboard data for offline access. Folder monitoring pauses while this page is offline.</p>
+    <p class="note">Your account and activity records remain on the application server. Reconnect to continue.</p>
     <a href="/">Try again</a>
   </main>
 </body>

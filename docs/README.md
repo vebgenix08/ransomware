@@ -24,28 +24,29 @@ Copy `.env.example` to `.env`, paste the generated value into `SECRET_KEY`, then
 
 ## Use the dashboard
 
-- **Run the SILRAD benchmark:** select **Prepare benchmark on server**, wait for setup to finish, then select **Run SILRAD held-out test**. The app trains on the publisher's training split and reports results on its separate test split. On Render, set `SILRAD_DATA_DIR` to a persistent-disk path if you have one; otherwise prepare again after a redeploy that clears local files.
+- **Run the online benchmark:** select **Prepare benchmark on server**, wait for setup to finish, then select **Run online benchmark**. The app trains on the published SILRAD data and scores its separate test stream prequentially. On Render, set `SILRAD_DATA_DIR` to a persistent-disk path if you have one; otherwise prepare again after a redeploy that clears local files.
 - **Monitor the hosted server:** set `MONITOR_TARGET_PATH` in `.env`, restart the app, then choose **Start server-folder monitor**. The default is the empty `instance/monitor_target` folder. Live alerts use a rolling 30-second window: at least 10 distinct deletions, 20 modifications, or 30 distinct changed files with at least 10 modified or deleted. Each alert includes the observed counts. The score is a heuristic activity indicator, not a probability. Alerts have a 60-second cooldown; rule-based alerts never auto-quarantine files.
 - **Choose a folder in the dashboard:** on Chrome or Edge over HTTPS (or localhost), select **Choose folder** to monitor a folder on the computer running your browser. The browser polls file names, sizes, and modification times and sends relative-path activity summaries to your account; it does not upload file contents. Monitoring runs only while the dashboard page remains open, can miss short-lived changes between scans, and supports folders with fewer than 5,000 files. The browser grants read access to the folder you select. The server-folder monitor above remains separate and watches only the host machine.
-- **Review results:** the dashboard refreshes events, alerts, and runs automatically. SILRAD predictions can be downloaded as a CSV. Dataset analysis never moves local files.
+- **Review results:** the dashboard refreshes events, alerts, and runs automatically. Benchmark predictions can be downloaded as a CSV. Dataset analysis never moves local files.
+- **Review alerts:** filter by open/resolved state and severity. **Acknowledge** marks an alert reviewed; **Resolve** closes it. Failed email attempts can be retried, but an SMTP-accepted email cannot be resent from the dashboard. The account-level email toggle is on by default and its changes appear in the audit history.
+- **Audit history:** the dashboard records sign-ins, email preference changes, monitoring start/stop, dataset analyses, incoming folder activity, and alert actions for the signed-in account. SMTP credentials remain in `.env` and are never displayed or stored in the account record.
 - **Laptop transfer:** follow [TWO_LAPTOP_SETUP.md](TWO_LAPTOP_SETUP.md) to receive CSVs over SFTP. The receiver validates the transfer manifest and checksum before analysis.
-- **VM folder monitoring:** follow [REMOTE_AGENT_SETUP.md](REMOTE_AGENT_SETUP.md) to forward safe file activity summaries from an HTTPS-connected Windows VM.
 
-### SILRAD Sysmon benchmark
+### RansomShield Online Benchmark
 
-The dashboard includes **Prepare benchmark on server** and **Run SILRAD held-out test** actions. The setup fetches the published archive at runtime and stores it under `SILRAD_DATA_DIR` (default `instance/silrad/`). It is not bundled in Git or the Docker image. You can also prepare it locally:
+The dashboard includes **Prepare benchmark on server** and **Run online benchmark** actions. The setup fetches the published SILRAD dataset at runtime and stores it under `SILRAD_DATA_DIR` (default `instance/silrad/`). It is not bundled in Git or the Docker image. You can also prepare it locally:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\setup_silrad.py
 ```
 
-The setup downloads the publisher's separate training and test CSVs, trains only on `fasttext-trainmodel.csv`, and evaluates only `fasttext-testmodel.csv`. The held-out test split contains 156,841 labeled Sysmon events; the training split contains 39,999. The app provides an aggregate report and a separate row-prediction CSV without copying raw command lines or other Sysmon text into the database. Results are a dataset benchmark, not a live-computer diagnosis. The model is this project's hashed-text XGBoost adaptation; it does not reproduce the paper's reported algorithm, and its 0.60 threshold is fixed rather than calibrated on the test split.
+The setup downloads the publisher's separate training and test CSVs. The primary benchmark uses an Adaptive Random Forest with ADWIN drift detectors on the publisher's five numeric SILRAD features. It chooses a recall-weighted F2 threshold using only the final 20% of the training file. Test evaluation is prequential: each event is predicted first, then its known SILRAD label updates the model for the next event. The report also includes a frozen-model diagnostic and a static hashed-text XGBoost comparison; these scores use different learning methods and should not be treated as a controlled head-to-head comparison. This offline dataset provides labels; the live endpoint does not have immediate verified labels, so this benchmark does not validate live detection. The implementation follows core SILRAD ideas but is not a bit-for-bit reproduction of the paper. The app provides aggregate results and row predictions without copying raw command lines or other Sysmon text into the database.
 
-The current run at the fixed 0.60 threshold produced 10.17% recall (1,986 true positives, 17,543 false negatives) on the publisher's held-out split. That is poor detection coverage, so this model is not suitable for live alerts. The source repository does not declare a redistribution license. The setup script keeps the data and derived model local under `instance/`; do not redistribute them without checking the publisher's terms. Source: [SILRAD dataset](https://github.com/JamilIsp/SILRAD-dataset).
+The source repository does not declare a redistribution license. The setup script keeps the data and derived models local under `instance/`; do not redistribute them without checking the publisher's terms. Sources: [SILRAD dataset](https://github.com/JamilIsp/SILRAD-dataset), [SILRAD paper](https://arxiv.org/abs/2501.01089).
 
 ### Dataset formats
 
-The dashboard benchmark uses SILRAD Sysmon event CSVs only. The setup script downloads the publisher's separate train and test splits; arbitrary CSV uploads are not part of this benchmark workflow. Other legacy CSV API routes remain for compatibility but are not shown in the dashboard.
+The dashboard benchmark uses the published SILRAD Sysmon event CSVs. The setup script downloads separate train and test splits; arbitrary CSV uploads are not part of this benchmark workflow. Other legacy CSV API routes remain for compatibility but are not shown in the dashboard.
 
 The bundled MLRan dataset is published research data. Its scores are specific to that dataset and inherit its sampling limitations. The TCN telemetry artifact is synthetic-trained and used only for offline CSV runs. No live endpoint detector here has been prospectively validated against real ransomware; burst alerts can still have false positives and misses.
 
@@ -63,10 +64,11 @@ SMTP_SECURITY=starttls
 SMTP_USERNAME=your-gmail-address
 SMTP_PASSWORD='your-16-character-app-password'
 RESPONSE_EMAIL_FROM='RansomShield <your-gmail-address>'
-RESPONSE_EMAIL_TO=recipient@example.com
+# Optional fallback only for alerts without an account owner
+RESPONSE_EMAIL_TO=
 ```
 
-Use a Google App Password, not your Google account password. Email alerts are sent as readable plain text and distinguish offline CSV results from live folder activity. Dataset notices state that flagged records do not indicate an infected computer. A `sent` status means Gmail accepted the message; it does not prove inbox delivery or reading. Automated tests mock SMTP and do not send email.
+Use a Google App Password, not your Google account password. Alerts for signed-in users go to that account's email; `RESPONSE_EMAIL_TO` is only a fallback for alerts without an account owner. Email alerts are sent as readable plain text and distinguish offline CSV results from live folder activity. Dataset notices state that flagged records do not indicate an infected computer. A `sent` status means Gmail accepted the message; it does not prove inbox delivery or reading. Automated tests mock SMTP and do not send email.
 
 For reusable per-installation email settings and the Firebase/hosting workflow, see [INTEGRATIONS_SETUP.md](INTEGRATIONS_SETUP.md). Firebase Authentication is optional; enable it only after entering that installation's web config and configuring trusted Firebase Admin credentials.
 
@@ -90,7 +92,7 @@ Run the automated suite from the project directory:
 
 The suite checks authentication, schema validation, model inference, incident ownership, notification outcomes with mocks, quarantine and restore behavior, SFTP integrity handling, and PWA routes. It does not test real Gmail delivery or a physical two-laptop transfer.
 
-To check Gmail delivery manually, run the SILRAD held-out evaluation from the signed-in dashboard. If it creates a suspicious incident, check the incident's email status and then the configured inbox. A successful SMTP status is not a delivery receipt.
+To check Gmail delivery manually, run the RansomShield Online Benchmark from the signed-in dashboard. If it creates a suspicious incident, check the incident's email status and then the inbox for the signed-in account. A successful SMTP status is not a delivery receipt.
 
 ## Project folders
 
@@ -100,6 +102,16 @@ To check Gmail delivery manually, run the SILRAD held-out evaluation from the si
 - `instance/` local database, monitor target, SILRAD files/model, received data, quarantine, and run reports; ignored by Git
 - `scripts/` training, evaluation, and SFTP sender/receiver utilities
 - `tests/` isolated automated tests
+
+## Documentation
+
+- This README: install, run, use, configure email, and understand current limits.
+- [INTEGRATIONS_SETUP.md](INTEGRATIONS_SETUP.md): per-installation environment settings and hosting notes.
+- [FIREBASE_SETUP_WALKTHROUGH.md](FIREBASE_SETUP_WALKTHROUGH.md): Firebase Authentication setup.
+- [TWO_LAPTOP_SETUP.md](TWO_LAPTOP_SETUP.md): transfer a dataset between Windows devices.
+- [data/README.md](data/README.md) and [data/mlran/README.md](data/mlran/README.md): dataset scope, sources, and limitations.
+
+The project presentation and research paper are retained as academic deliverables. Their historical methodology and results may not describe the current implementation; use this README for current application behavior.
 
 ## Known limits
 

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ransomshield-shell-v1';
+const CACHE_NAME = 'ransomshield-shell-v3';
 const OFFLINE_URL = '/offline';
 const SHELL_ASSETS = [
   OFFLINE_URL,
@@ -6,6 +6,7 @@ const SHELL_ASSETS = [
   '/static/icons/icon.svg',
   '/static/icons/icon-192.png',
   '/static/icons/icon-512.png',
+  '/static/app.css',
   '/static/vendor/bootstrap/bootstrap.min.css',
   '/static/vendor/bootstrap/bootstrap.bundle.min.js',
   '/static/vendor/bootstrap-icons/bootstrap-icons.min.css',

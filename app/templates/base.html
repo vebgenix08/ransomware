@@ -215,9 +215,11 @@
         }
     </style>
     {% block styles %}{% endblock %}
+    <link href="{{ url_for('static', filename='app.css') }}?v=20261021-2" rel="stylesheet">
 </head>
 
 <body x-data="siteShell()">
+    <a class="skip-link" href="#main-content">Skip to main content</a>
     <button id="install-app" class="btn-brand position-fixed bottom-0 end-0 m-3 d-none" style="z-index:1050" type="button">Install RansomShield</button>
     <nav class="site-nav fixed-top" aria-label="Primary navigation">
         <div class="container py-3">
@@ -368,7 +370,7 @@
     </script>
     {% if AUTH_PROVIDER == 'firebase' %}
     <script id="firebase-web-config" type="application/json">{{ FIREBASE_WEB_CONFIG|tojson }}</script>
-    <script type="module" src="{{ url_for('static', filename='firebase-auth.js') }}?v=2"></script>
+    <script type="module" src="{{ url_for('static', filename='firebase-auth.js') }}?v=3"></script>
     {% endif %}
     {% block scripts %}{% endblock %}
 </body>

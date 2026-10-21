@@ -16,7 +16,7 @@ from watchdog.observers import Observer
 
 ROOT = Path(__file__).resolve().parents[1]
 # Prefer the Render-specific file if present; keep credentials out of command
-# history and never print values. The VM can use environment variables instead.
+# history and never print values. Endpoints can use environment variables instead.
 load_dotenv(ROOT / ".render.env", override=False, interpolate=False)
 load_dotenv(ROOT / ".env", override=False, interpolate=False)
 
@@ -74,7 +74,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server", required=True, help="RansomShield HTTPS origin, e.g. https://shield.example.com")
     parser.add_argument("--folder", required=True, type=Path, help="Folder to monitor on this endpoint")
-    parser.add_argument("--name", default=os.environ.get("RANSOMSHIELD_AGENT_NAME", "windows-vm"))
+    parser.add_argument("--name", default=os.environ.get("RANSOMSHIELD_AGENT_NAME", "endpoint-1"))
     args = parser.parse_args()
     token = os.environ.get("RANSOMSHIELD_AGENT_TOKEN") or os.environ.get("AGENT_API_TOKEN", "")
     if not token:

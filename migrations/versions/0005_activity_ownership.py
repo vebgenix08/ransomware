@@ -14,14 +14,22 @@ depends_on = None
 
 
 def upgrade() -> None:
-    with op.batch_alter_table("monitoring_events") as batch:
-        batch.add_column(sa.Column("user_id", sa.Integer(), nullable=True))
-        batch.create_foreign_key("fk_monitoring_events_user_id_users", "users", ["user_id"], ["id"])
-        batch.create_index("ix_monitoring_events_user_id", ["user_id"])
-    with op.batch_alter_table("alerts") as batch:
-        batch.add_column(sa.Column("user_id", sa.Integer(), nullable=True))
-        batch.create_foreign_key("fk_alerts_user_id_users", "users", ["user_id"], ["id"])
-        batch.create_index("ix_alerts_user_id", ["user_id"])
+    if op.get_bind().dialect.name == "sqlite":
+        # SQLite table rebuilds fail when other tables still reference alerts.
+        # Adding a nullable REFERENCES column in place preserves those links.
+        op.execute("ALTER TABLE monitoring_events ADD COLUMN user_id INTEGER REFERENCES users (id)")
+        op.create_index("ix_monitoring_events_user_id", "monitoring_events", ["user_id"])
+        op.execute("ALTER TABLE alerts ADD COLUMN user_id INTEGER REFERENCES users (id)")
+        op.create_index("ix_alerts_user_id", "alerts", ["user_id"])
+    else:
+        with op.batch_alter_table("monitoring_events") as batch:
+            batch.add_column(sa.Column("user_id", sa.Integer(), nullable=True))
+            batch.create_foreign_key("fk_monitoring_events_user_id_users", "users", ["user_id"], ["id"])
+            batch.create_index("ix_monitoring_events_user_id", ["user_id"])
+        with op.batch_alter_table("alerts") as batch:
+            batch.add_column(sa.Column("user_id", sa.Integer(), nullable=True))
+            batch.create_foreign_key("fk_alerts_user_id_users", "users", ["user_id"], ["id"])
+            batch.create_index("ix_alerts_user_id", ["user_id"])
     # Preserve account-owned dataset incidents created before ownership was explicit.
     op.execute(sa.text("""
         UPDATE alerts SET user_id = (

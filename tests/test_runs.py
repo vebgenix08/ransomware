@@ -2,6 +2,7 @@ import csv
 import io
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
@@ -10,7 +11,7 @@ from flask import g
 from app import create_app
 from app.detector import FEATURE_NAMES
 from app.extensions import db
-from app.models import Alert, AnalysisRun, MonitoringEvent, QuarantineItem, User
+from app.models import Alert, AnalysisRun, MonitoringEvent, QuarantineItem, User, ResponseAction, AuditLog
 
 
 class RunTests(unittest.TestCase):
@@ -181,10 +182,76 @@ class RunTests(unittest.TestCase):
         dashboard = self.client.get('/dashboard')
         self.assertEqual(dashboard.status_code, 200)
         self.assertIn('Start here: test and use RansomShield', dashboard.text)
-        self.assertIn('SILRAD Sysmon benchmark', dashboard.text)
+        self.assertIn('RansomShield Online Benchmark', dashboard.text)
         self.assertNotIn('Published MLRan evaluation', dashboard.text)
         self.assertNotIn('never-expose-me', self.client.get('/api/notifications').text)
         self.assertIn('Run history', dashboard.text)
+        self.assertIn('Audit history', dashboard.text)
+        self.assertIn('Resolve', dashboard.text)
+        self.assertIn('Severity', dashboard.text)
+        self.assertIn('Turn off email alerts', dashboard.text)
+
+    def test_email_alert_preference_is_editable_audited_and_respected(self):
+        response = self.client.post('/api/notifications/email', json={'enabled': False})
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertFalse(response.json['enabled'])
+        self.assertEqual(self.client.get('/api/notifications').json['email'], 'disabled for this account')
+        self.assertEqual(self.client.get('/api/audit').json['entries'][0]['action'], 'settings_changed')
+        alert = Alert(user_id=self.user.id, title='Preference alert', details='activity', severity='high', risk_score=80)
+        db.session.add(alert)
+        db.session.commit()
+        with patch('app.response.smtplib.SMTP') as smtp:
+            from app.response import respond
+            action = respond(self.app, alert, self.root/'decoy', set())
+        smtp.assert_not_called()
+        self.assertEqual(action.result['notifications']['email'], 'disabled')
+        self.assertEqual(self.client.post('/api/notifications/email', json={'enabled': 'false'}).status_code, 400)
+
+    def test_alert_filters_acknowledgement_resolution_and_audit_are_account_scoped(self):
+        open_alert = Alert(user_id=self.user.id, title='Open alert', details='a', severity='high', risk_score=80)
+        resolved_alert = Alert(user_id=self.user.id, title='Resolved alert', details='b', severity='low', risk_score=20,
+                               resolved_at=datetime.now(timezone.utc))
+        db.session.add_all([open_alert, resolved_alert])
+        db.session.commit()
+        self.assertEqual([a['title'] for a in self.client.get('/api/alerts?status=open').json['alerts']], ['Open alert'])
+        self.assertEqual([a['title'] for a in self.client.get('/api/alerts?status=resolved').json['alerts']], ['Resolved alert'])
+        self.assertEqual([a['title'] for a in self.client.get('/api/alerts?severity=high').json['alerts']], ['Open alert'])
+        self.assertEqual(self.client.get('/api/alerts?status=wrong').status_code, 400)
+        response = self.client.post(f'/api/alerts/{open_alert.id}/acknowledge')
+        self.assertTrue(response.json['alert']['acknowledged'])
+        response = self.client.post(f'/api/alerts/{open_alert.id}/resolve')
+        self.assertIsNotNone(response.json['alert']['resolved_at'])
+        audit = self.client.get('/api/audit').json['entries']
+        self.assertEqual([row['action'] for row in audit[:2]], ['alert_resolved', 'alert_acknowledged'])
+
+    def test_failed_email_can_be_retried_and_attempt_is_recorded(self):
+        alert = Alert(user_id=self.user.id, title='Retry alert', details='review', severity='high', risk_score=80)
+        db.session.add(alert)
+        db.session.flush()
+        action = ResponseAction(alert_id=alert.id, completed=True,
+                                result={'files': [], 'notifications': {'email': 'failed', 'webhook': 'disabled'},
+                                        'quarantine': 'no_files'})
+        db.session.add(action)
+        db.session.commit()
+        self.app.config.update(RESPONSE_EMAIL_FROM='sender@example.com', SMTP_HOST='smtp.example.com',
+                               SMTP_PORT=587, SMTP_SECURITY='starttls', SMTP_USERNAME='', SMTP_PASSWORD='')
+        with patch('app.response.smtplib.SMTP') as smtp:
+            smtp.return_value.__enter__.return_value.send_message.return_value = {}
+            response = self.client.post(f'/api/alerts/{alert.id}/retry-email')
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(response.json['alert']['response']['notifications']['email'], 'sent')
+        attempts = response.json['alert']['response']['notification_attempts']['email']
+        self.assertEqual(attempts[-1]['status'], 'sent')
+        self.assertEqual(AuditLog.query.filter_by(action='alert_email_retried').count(), 1)
+
+    def test_email_retry_cannot_be_used_to_duplicate_an_accepted_message(self):
+        alert = Alert(user_id=self.user.id, title='Sent alert', details='review', severity='medium', risk_score=60)
+        db.session.add(alert)
+        db.session.flush()
+        db.session.add(ResponseAction(alert_id=alert.id, completed=True,
+                                      result={'files': [], 'notifications': {'email': 'sent'}}))
+        db.session.commit()
+        self.assertEqual(self.client.post(f'/api/alerts/{alert.id}/retry-email').status_code, 409)
 
     def test_upload_limits_and_published_dataset_download(self):
         self.assertEqual(self.upload(b'x' * (5 * 1024 * 1024)).status_code, 413)
@@ -278,12 +345,16 @@ class RunTests(unittest.TestCase):
         self.assertNotIn('CommandLine', str(run['result']))
         predictions = self.client.get(f"/api/runs/{run['id']}/predictions.csv")
         self.assertEqual(predictions.status_code, 200)
-        self.assertIn('row_number,actual_class,predicted_class,probability,correct', predictions.text[:200])
+        self.assertIn(
+            'row_number,actual_class,predicted_class,probability,frozen_predicted_class,frozen_probability,correct',
+            predictions.text[:250],
+        )
         predictions.close()
         status = self.client.get('/api/silrad/status')
         self.assertEqual(status.status_code, 200)
         self.assertTrue(status.json['ready'])
-        self.assertAlmostEqual(status.json['metrics']['recall'], 1986 / 19529)
+        self.assertAlmostEqual(status.json['metrics']['recall'], run['result']['metrics']['recall'])
+        self.assertAlmostEqual(status.json['xgboost_comparison']['metrics']['recall'], 1986 / 19529)
 
     def test_silrad_status_and_server_prepare_action(self):
         preparation = self.app.extensions['silrad_preparation']

@@ -24,16 +24,20 @@ class SilradPreparation:
 
     def status(self) -> dict:
         metadata_path = self.directory / "metadata.json"
+        incremental_metadata_path = self.directory / "incremental_metadata.json"
         test_path = self.directory / "fasttext-testmodel.csv"
         train_path = self.directory / "fasttext-trainmodel.csv"
-        if metadata_path.is_file() and test_path.is_file() and train_path.is_file():
+        model_path = self.directory / "silrad_incremental.pkl"
+        if metadata_path.is_file() and incremental_metadata_path.is_file() and model_path.is_file() and test_path.is_file() and train_path.is_file():
             try:
                 import json
                 metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-                booster_name = metadata.get("booster", "")
-                if not booster_name or Path(booster_name).name != booster_name or not (self.directory / booster_name).is_file():
-                    raise ValueError("SILRAD model artifact is missing or invalid.")
-                evaluation = metadata.get("heldout_evaluation", {})
+                incremental = metadata.get("incremental_model", {})
+                comparison = metadata.get("xgboost_comparison", {}).get("heldout_evaluation", {})
+                artifact_name = incremental.get("model_file", "")
+                if artifact_name != model_path.name:
+                    raise ValueError("SILRAD incremental model artifact is missing or invalid.")
+                evaluation = incremental.get("heldout_evaluation", {})
                 metrics = evaluation.get("metrics")
                 confusion_matrix = evaluation.get("confusion_matrix")
                 if (
@@ -48,14 +52,22 @@ class SilradPreparation:
                 return {
                     "ready": True,
                     "state": "ready",
-                    "model_name": metadata.get("display_name"),
-                    "training_rows": metadata.get("training_rows"),
+                    "model_name": incremental.get("display_name"),
+                    "training_rows": incremental.get("training_rows"),
                     "test_rows": evaluation.get("windows"),
                     "threshold": evaluation.get("threshold"),
                     "metrics": metrics,
                     "confusion_matrix": confusion_matrix,
                     "class_counts": evaluation.get("class_counts", {}),
-                    "limitations": metadata.get("limitations", []),
+                    "validation": incremental.get("validation", {}),
+                    "frozen_model_evaluation": evaluation.get("frozen_model_evaluation", {}),
+                    "xgboost_comparison": {
+                        "model_name": metadata.get("display_name", "XGBoost comparison"),
+                        "threshold": comparison.get("threshold"),
+                        "metrics": comparison.get("metrics", {}),
+                        "confusion_matrix": comparison.get("confusion_matrix", {}),
+                    },
+                    "limitations": incremental.get("limitations", []),
                 }
             except (OSError, ValueError, TypeError):
                 pass

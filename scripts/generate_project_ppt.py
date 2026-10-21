@@ -9,7 +9,7 @@ from pptx.util import Inches, Pt
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT / "RansomShield_Current_Implementation.pptx"
+OUTPUT = ROOT / "docs" / "research" / "RansomShield_Current_Implementation.pptx"
 
 SLIDE_W = 13.333
 SLIDE_H = 7.5
@@ -515,6 +515,7 @@ def build_deck():
     prs.core_properties.subject = "Flask authentication, safe monitoring, dashboard, and project roadmap"
     prs.core_properties.author = "RansomShield Project Team"
     prs.core_properties.keywords = "RansomShield, Flask, ransomware detection, behavioral monitoring, cybersecurity"
+    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     prs.save(OUTPUT)
     print(OUTPUT)
     print(f"slides={len(prs.slides)}")
