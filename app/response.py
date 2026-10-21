@@ -197,9 +197,13 @@ def respond(app, alert, root, affected, quarantine_allowed=True):
                     if isinstance(refused, dict) and refused:
                         raise ValueError("Some recipients were refused")
             result["notifications"][channel] = "sent"
-        except Exception:
+        except Exception as exc:
             result["notifications"][channel] = "failed"
-            app.logger.warning("Response notification failed: %s, alert %s", channel, alert.id)
+            # Keep credentials and message contents out of logs, but retain the
+            # exception category and provider's short response for diagnosis.
+            reason = " ".join(str(exc).split())[:240]
+            app.logger.warning("Response notification failed: %s, alert %s (%s: %s)",
+                               channel, alert.id, type(exc).__name__, reason or "no detail")
     action.result = json.loads(json.dumps(result))
     flag_modified(action, "result")
     action.completed = True
