@@ -63,6 +63,106 @@ def agent_event():
     return jsonify(ok=True, duplicate=False, evaluated=True, alert_created=burst_alert), 202
 
 
+@api.post("/browser-folder/events")
+@login_required
+def browser_folder_events():
+    """Persist metadata-only changes reported by a user's browser folder watcher."""
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or not isinstance(body.get("events"), list):
+        return jsonify(ok=False, message="Expected an events list."), 400
+    folder_id = str(body.get("folder_id", ""))
+    try:
+        folder_id = str(UUID(folder_id))
+    except (ValueError, TypeError, AttributeError):
+        return jsonify(ok=False, message="folder_id must be a UUID."), 400
+    raw_folder_name = body.get("folder_name", "Selected folder")
+    if not isinstance(raw_folder_name, str):
+        return jsonify(ok=False, message="folder_name must be a string."), 400
+    folder_name = re.sub(r"[\x00-\x1f\x7f]", "", raw_folder_name).strip()[:30] or "Selected folder"
+    batch = body["events"]
+    if not batch or len(batch) > 100:
+        return jsonify(ok=False, message="Send between 1 and 100 events per request."), 400
+
+    accepted = 0
+    seen_ids = set()
+    prepared = []
+    for item in batch:
+        if not isinstance(item, dict):
+            return jsonify(ok=False, message="Each event must be an object."), 400
+        try:
+            event_id = str(UUID(str(item.get("event_id", ""))))
+        except (ValueError, TypeError, AttributeError):
+            return jsonify(ok=False, message="event_id must be a UUID."), 400
+        operation = item.get("operation")
+        raw_path = item.get("path", "")
+        if not isinstance(operation, str) or operation not in {"created", "modified", "deleted"}:
+            return jsonify(ok=False, message="Unsupported file operation."), 400
+        if not isinstance(raw_path, str):
+            return jsonify(ok=False, message="path must be a string."), 400
+        relative_path = raw_path.replace("\\", "/")
+        if (not relative_path or len(relative_path) > 400 or relative_path.startswith("/")
+                or any(part in {"", ".", ".."} for part in relative_path.split("/"))):
+            return jsonify(ok=False, message="path must be a safe relative path."), 400
+        if event_id in seen_ids or MonitoringEvent.query.filter_by(event_id=event_id).first():
+            continue
+        seen_ids.add(event_id)
+        prepared.append((event_id, operation, relative_path))
+
+    for event_id, operation, relative_path in prepared:
+        db.session.add(MonitoringEvent(
+            user_id=current_user.id,
+            event_id=event_id,
+            event_type=f"file_{operation}",
+            severity="info",
+            details=f"Browser folder {folder_id} ({folder_name}): {operation} {relative_path}"[:500],
+            risk_score=0,
+            source="browser",
+        ))
+        accepted += 1
+
+    db.session.commit()
+    alert_created = evaluate_browser_folder_window(folder_id, folder_name, current_user.id) if accepted else False
+    return jsonify(ok=True, accepted=accepted, alert_created=alert_created), 202
+
+
+def evaluate_browser_folder_window(folder_id: str, folder_name: str, user_id: int) -> bool:
+    """Apply the published rolling burst rules to one authenticated browser folder."""
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=30)
+    prefix = f"Browser folder {folder_id} ({folder_name}): "
+    events = MonitoringEvent.query.filter(
+        MonitoringEvent.source == "browser",
+        MonitoringEvent.user_id == user_id,
+        MonitoringEvent.created_at >= cutoff,
+    ).all()
+    paths = {"created": set(), "modified": set(), "deleted": set()}
+    for event in events:
+        if not event.details.startswith(prefix):
+            continue
+        operation = event.event_type.removeprefix("file_")
+        if operation in paths:
+            paths[operation].add(event.details.removeprefix(f"{prefix}{operation} "))
+    created, modified, deleted = (paths[key] for key in ("created", "modified", "deleted"))
+    total = len(created | modified | deleted)
+    destructive = len(modified | deleted)
+    if not (len(deleted) >= 10 or len(modified) >= 20 or (total >= 30 and destructive >= 10)):
+        return False
+    if Alert.query.filter_by(user_id=user_id, model_version="browser-folder-burst-v1").filter(
+            Alert.created_at >= now - timedelta(seconds=60)).first():
+        return False
+    risk = min(100, round(100 * max(len(deleted) / 10, len(modified) / 20, total / 30)))
+    severe = len(deleted) >= 20 or len(modified) >= 40 or (total >= 60 and destructive >= 20)
+    current_app.extensions["monitoring_service"]._persist_alert(
+        "Browser folder file-change burst",
+        (f"Browser folder {folder_name} reported {total} distinct file changes in 30 seconds "
+         f"({len(created)} created, {len(modified)} modified, {len(deleted)} deleted). "
+         "Review this activity; this rule is an anomaly signal, not a malware verdict."),
+        "high" if severe else "medium", max(risk, 60), created | modified | deleted,
+        model_version="browser-folder-burst-v1", owner_id=user_id,
+    )
+    return True
+
+
 def evaluate_agent_window(agent: str, user_id: int) -> bool:
     """Evaluate persisted agent events so separate cloud instances share state."""
     now = datetime.now(timezone.utc)

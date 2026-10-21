@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from uuid import uuid4
 from flask import g
 
 from app import create_app
@@ -221,6 +222,33 @@ class RunTests(unittest.TestCase):
         self.assertEqual(policy['alert_thresholds']['modified_files'], 20)
         self.assertFalse(policy['automatic_quarantine'])
         self.assertIn('not a probability', policy['score_type'])
+
+    def test_browser_folder_events_are_authenticated_scoped_deduplicated_and_alerted(self):
+        folder_id = str(uuid4())
+        events = [{"event_id": str(uuid4()), "operation": "modified", "path": f"safe/file-{i}.txt"}
+                  for i in range(20)]
+        response = self.client.post('/api/browser-folder/events', json={"folder_id": folder_id, "events": events})
+        self.assertEqual(response.status_code, 202, response.json)
+        self.assertEqual(response.json['accepted'], 20)
+        self.assertTrue(response.json['alert_created'])
+        self.assertEqual(MonitoringEvent.query.filter_by(source='browser', user_id=self.user.id).count(), 20)
+        alert = Alert.query.filter_by(model_version='browser-folder-burst-v1', user_id=self.user.id).one()
+        self.assertIn('20 distinct file changes', alert.details)
+        self.assertTrue(alert.responses[0].completed)
+
+        duplicate = self.client.post('/api/browser-folder/events', json={"folder_id": folder_id, "events": events})
+        self.assertEqual(duplicate.status_code, 202)
+        self.assertEqual(duplicate.json['accepted'], 0)
+        self.assertEqual(MonitoringEvent.query.filter_by(source='browser', user_id=self.user.id).count(), 20)
+
+        invalid = self.client.post('/api/browser-folder/events', json={"folder_id": folder_id, "events": [
+            {"event_id": str(uuid4()), "operation": "created", "path": "../outside.txt"}
+        ]})
+        self.assertEqual(invalid.status_code, 400)
+
+        g.pop('_login_user', None)
+        anonymous = self.app.test_client().post('/api/browser-folder/events', json={"folder_id": folder_id, "events": events[:1]})
+        self.assertEqual(anonymous.status_code, 302)
 
     def test_included_mlran_runs_and_exports_real_published_predictions(self):
         response = self.client.post('/api/runs/mlran')

@@ -36,11 +36,11 @@
             <div>
                 <span class="account-chip"><i class="bi bi-shield-check"></i>Authenticated workspace</span>
                 <h1 class="dashboard-heading mt-3 mb-2">Welcome, {{ current_user.full_name }}.</h1>
-                <p class="muted mb-0">Run the SILRAD benchmark, monitor a configured directory, and review results.</p>
+                <p class="muted mb-0">Choose a folder on this device, review file activity, and run the SILRAD benchmark.</p>
             </div>
             <div class="control-bar">
-                <button class="btn-brand" type="button" @click="startMonitor" :disabled="busy || status.running"><i class="bi bi-play-fill me-2"></i>Start monitoring</button>
-                <button class="btn-outline-custom" type="button" @click="stopMonitor" :disabled="busy || !status.running"><i class="bi bi-stop-fill me-2"></i>Stop</button>
+                <button class="btn-brand" type="button" @click="startMonitor" :disabled="busy || status.running"><i class="bi bi-play-fill me-2"></i>Start server-folder monitor</button>
+                <button class="btn-outline-custom" type="button" @click="stopMonitor" :disabled="busy || !status.running"><i class="bi bi-stop-fill me-2"></i>Stop server monitor</button>
             </div>
         </div>
 
@@ -63,7 +63,7 @@
                 </div>
                 <div class="col-md-6">
                     <h3 class="h6">3. Monitor a folder you control</h3>
-                    <p class="small muted mb-0">Use <strong>Start monitoring</strong> above to watch the configured folder shown in Filesystem activity. Try a disposable folder first. Alerts use file-change burst rules, not malware proof; stop monitoring when you finish.</p>
+                    <p class="small muted mb-0">Use <strong>Choose folder</strong> to watch a folder on this device while this page is open. The server-folder monitor watches the hosted server only. Alerts are file-change rules, not malware proof; start with a disposable folder.</p>
                 </div>
                 <div class="col-md-6">
                     <h3 class="h6">4. Review and export</h3>
@@ -71,6 +71,18 @@
                 </div>
             </div>
         </details>
+
+        <section class="panel p-4 mb-4" aria-labelledby="device-folder-heading">
+            <h2 id="device-folder-heading" class="h4">Monitor a folder on this device</h2>
+            <p class="small muted">Choose a folder below. While this dashboard stays open, your browser checks file names, sizes, and modified times every few seconds and sends change summaries to your account. File contents are not uploaded. Monitoring stops when you stop it or close this page; very brief changes between scans may be missed.</p>
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <button class="btn-brand" type="button" @click="chooseFolder" :disabled="folderBusy || folderWatching"><i class="bi bi-folder2-open me-2"></i>Choose folder</button>
+                <button class="btn-outline-custom" type="button" @click="stopFolderWatch" :disabled="!folderWatching"><i class="bi bi-stop-fill me-2"></i>Stop device-folder monitoring</button>
+                <span class="state-badge" :class="folderWatching ? 'running' : ''"><span class="state-dot"></span><span x-text="folderWatching ? 'Watching in this browser' : 'Not watching'"></span></span>
+            </div>
+            <p class="small mt-3 mb-0" :class="folderMessageType === 'error' ? 'text-danger' : 'muted'" x-text="folderMessage || 'Use Chrome or Edge on HTTPS (or localhost). Start with a disposable test folder.'" role="status"></p>
+            <p class="small muted mt-2 mb-0" x-show="folderName">Selected folder: <strong x-text="folderName"></strong> · <span x-text="folderFileCount"></span> files in last scan</p>
+        </section>
 
         <section class="panel p-4 mb-4" aria-labelledby="silrad-heading">
             <h2 id="silrad-heading" class="h4">SILRAD Sysmon benchmark</h2>
@@ -125,7 +137,7 @@
             <div class="col-sm-6 col-xl-3">
                 <article class="status-card">
                     <div class="d-flex justify-content-between"><span class="status-icon"><i class="bi bi-activity"></i></span><span class="state-badge" :class="status.running ? 'running' : ''"><span class="state-dot"></span><span x-text="status.connection_state"></span></span></div>
-                    <div class="metric-value mt-4" x-text="status.running ? 'Live' : 'Offline'"></div><span class="muted small">Monitoring agent</span>
+                    <div class="metric-value mt-4" x-text="status.running ? 'Live' : 'Offline'"></div><span class="muted small">Hosted server monitor</span>
                 </article>
             </div>
             <div class="col-sm-6 col-xl-3">
@@ -171,15 +183,15 @@
                     </div>
 
                     <div class="empty-state" x-show="!events.length">
-                        <div><span class="status-icon mx-auto mb-3"><i class="bi bi-inbox"></i></span><h3 class="h5">No events recorded</h3><p class="muted small mb-0">Set MONITOR_TARGET_PATH to the directory you want to observe, then start monitoring.</p></div>
+                        <div><span class="status-icon mx-auto mb-3"><i class="bi bi-inbox"></i></span><h3 class="h5">No events recorded</h3><p class="muted small mb-0">Choose a folder on this device above, or start the hosted server-folder monitor.</p></div>
                     </div>
                 </section>
             </div>
 
             <div class="col-lg-4">
                 <section class="panel p-4 h-100">
-                    <small class="muted">MONITORED DIRECTORY</small><h2 class="h4 mt-1">Filesystem activity</h2>
-                    <p class="muted small">Only the configured directory is observed. Live alerts use a rolling 30-second rule: 10 deletions, 20 modifications, or 30 distinct changed files with at least 10 modified or deleted. The score is an activity heuristic, not a ransomware probability.</p>
+                    <small class="muted">HOSTED SERVER DIRECTORY</small><h2 class="h4 mt-1">Server filesystem activity</h2>
+                    <p class="muted small">This section reports the application server’s configured directory. To watch a folder on this device, use <strong>Monitor a folder on this device</strong> above. Live alerts use a rolling 30-second rule: 10 deletions, 20 modifications, or 30 distinct changed files with at least 10 modified or deleted. The score is an activity heuristic, not a ransomware probability.</p>
                     <p class="muted small">A burst alert asks for review; it does not identify malware. Automatic quarantine is disabled for these rule-based alerts.</p>
                     <div class="safe-note mt-3"><i class="bi bi-folder2-open me-2" style="color:var(--accent)"></i><code style="color:var(--text)" x-text="status.target"></code></div>
                     <hr class="my-4" style="border-color:var(--line)">
@@ -270,6 +282,17 @@
             quarantine: [],
             silrad: {ready: false, state: 'idle'},
             refreshTimer: null,
+            folderHandle: null,
+            folderTimer: null,
+            folderChecking: false,
+            folderWatching: false,
+            folderBusy: false,
+            folderName: '',
+            folderMessage: '',
+            folderMessageType: 'info',
+            folderFileCount: 0,
+            folderSnapshot: new Map(),
+            folderId: '',
             status: {
                 running: false,
                 connection_state: 'Loading',
@@ -290,6 +313,7 @@
             },
             destroy() {
                 window.clearInterval(this.refreshTimer);
+                this.stopFolderWatch();
             },
             async fetchJson(url, options = {}) {
                 const headers = {Accept: 'application/json', ...(options.headers || {})};
@@ -343,6 +367,100 @@
                 }
             },
             startMonitor() { return this.performAction('{{ url_for("api.start_monitor") }}'); },
+            async chooseFolder() {
+                if (!window.isSecureContext || typeof window.showDirectoryPicker !== 'function') {
+                    this.folderMessage = 'Folder monitoring requires Chrome or Edge on HTTPS (or localhost).';
+                    this.folderMessageType = 'error';
+                    return;
+                }
+                this.folderBusy = true;
+                try {
+                    const handle = await window.showDirectoryPicker({mode: 'read'});
+                    const permission = await handle.queryPermission({mode: 'read'});
+                    if (permission !== 'granted' && await handle.requestPermission({mode: 'read'}) !== 'granted') {
+                        throw new Error('Folder read permission was not granted.');
+                    }
+                    this.stopFolderWatch();
+                    this.folderHandle = handle;
+                    this.folderName = handle.name;
+                    this.folderId = crypto.randomUUID();
+                    this.folderSnapshot = await this.scanFolder(handle);
+                    this.folderFileCount = this.folderSnapshot.size;
+                    this.folderWatching = true;
+                    this.folderMessage = `Watching ${handle.name}. The first scan is a baseline; existing files are not reported as new.`;
+                    this.folderMessageType = 'info';
+                    this.folderTimer = window.setInterval(() => this.checkFolder(), 5000);
+                } catch (error) {
+                    if (error.name !== 'AbortError') {
+                        this.folderMessage = error.message || 'Could not open the selected folder.';
+                        this.folderMessageType = 'error';
+                    }
+                } finally {
+                    this.folderBusy = false;
+                }
+            },
+            stopFolderWatch() {
+                if (this.folderTimer) window.clearInterval(this.folderTimer);
+                this.folderTimer = null;
+                this.folderWatching = false;
+                this.folderHandle = null;
+                this.folderSnapshot = new Map();
+            },
+            async scanFolder(root) {
+                const files = new Map();
+                const walk = async (directory, prefix = '') => {
+                    for await (const entry of directory.values()) {
+                        if (files.size >= 5000) break;
+                        const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+                        if (entry.kind === 'directory') {
+                            await walk(entry, relative);
+                        } else if (files.size < 5000) {
+                            const file = await entry.getFile();
+                            files.set(relative, `${file.size}:${file.lastModified}`);
+                        }
+                    }
+                };
+                await walk(root);
+                if (files.size >= 5000) throw new Error('This folder has 5,000 or more files. Choose a smaller folder.');
+                return files;
+            },
+            async checkFolder() {
+                if (!this.folderWatching || !this.folderHandle || this.folderChecking) return;
+                this.folderChecking = true;
+                try {
+                    const permission = await this.folderHandle.queryPermission({mode: 'read'});
+                    if (permission !== 'granted') throw new Error('Folder permission expired. Choose the folder again.');
+                    const current = await this.scanFolder(this.folderHandle);
+                    const changes = [];
+                    for (const [path, metadata] of current) {
+                        const old = this.folderSnapshot.get(path);
+                        if (old === undefined) changes.push({operation: 'created', path});
+                        else if (old !== metadata) changes.push({operation: 'modified', path});
+                    }
+                    for (const path of this.folderSnapshot.keys()) {
+                        if (!current.has(path)) changes.push({operation: 'deleted', path});
+                    }
+                    this.folderSnapshot = current;
+                    this.folderFileCount = current.size;
+                    for (let offset = 0; offset < changes.length; offset += 100) {
+                        const events = changes.slice(offset, offset + 100).filter(change => change.path.length <= 400)
+                            .map(change => ({...change, event_id: crypto.randomUUID()}));
+                        if (!events.length) continue;
+                        await this.fetchJson('/api/browser-folder/events', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({folder_id: this.folderId, folder_name: this.folderName, events})
+                        });
+                    }
+                    if (changes.length) await this.refreshAll(false);
+                } catch (error) {
+                    this.folderMessage = error.message || 'Folder scan failed. Select the folder again to resume.';
+                    this.folderMessageType = 'error';
+                    this.stopFolderWatch();
+                } finally {
+                    this.folderChecking = false;
+                }
+            },
             metric(value) { return value == null ? 'undefined' : (value * 100).toFixed(2) + '%'; },
             stopMonitor() { return this.performAction('{{ url_for("api.stop_monitor") }}'); },
             prepareSilrad() { return this.performAction('/api/silrad/prepare'); },

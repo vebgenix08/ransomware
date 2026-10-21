@@ -47,7 +47,7 @@ def _format_alert_email(alert, result, app_name: str) -> tuple[str, str]:
         ])
         if alert.details:
             lines.append(f"Run details: {alert.details}")
-    elif model_version.startswith("rolling-file-burst"):
+    elif model_version.startswith(("rolling-file-burst", "browser-folder-burst", "endpoint-agent-burst")):
         lines.extend([
             "Analysis type: Live monitored-folder activity",
             "A rolling file-change rule crossed its review threshold.",
@@ -68,7 +68,7 @@ def _format_alert_email(alert, result, app_name: str) -> tuple[str, str]:
 
     if "suspicious_windows" in trace:
         subject = f"{app_name}: dataset analysis flagged records (alert #{alert.id})"
-    elif model_version.startswith("rolling-file-burst"):
+    elif model_version.startswith(("rolling-file-burst", "browser-folder-burst", "endpoint-agent-burst")):
         subject = f"{app_name}: file activity burst for review (alert #{alert.id})"
     else:
         subject = f"{app_name}: activity alert for review (alert #{alert.id})"
