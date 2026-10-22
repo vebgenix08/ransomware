@@ -116,6 +116,7 @@ def browser_folder_events():
             event_type=f"file_{operation}",
             severity="info",
             details=f"Browser folder {folder_id} ({folder_name}): {operation} {relative_path}"[:500],
+            file_activity=[{"operation": operation, "path": relative_path}],
             risk_score=0,
             source="browser",
         ))
@@ -613,9 +614,78 @@ def update_email_notifications():
 @login_required
 def list_events():
     limit = min(max(request.args.get("limit", 10, type=int), 1), 50)
-    events = (MonitoringEvent.query.filter_by(user_id=current_user.id)
-              .order_by(MonitoringEvent.created_at.desc()).limit(limit).all())
-    return jsonify({"events": [event.to_dict() for event in events]})
+    # Browser folder events are stored one row per file so burst rules can count
+    # distinct paths. Present nearby changes from one folder scan as a single
+    # readable activity row, matching the server-folder monitor's UI.
+    rows = (MonitoringEvent.query.filter_by(user_id=current_user.id)
+            .order_by(MonitoringEvent.created_at.desc()).limit(min(limit * 100, 5000)).all())
+    grouped = []
+    browser_groups = {}
+    browser_event = re.compile(r"^Browser folder ([0-9a-f-]{36}) \((.*?)\): ", re.IGNORECASE)
+
+    def event_timestamp(event):
+        created = event.created_at
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        return created.timestamp()
+
+    for event in reversed(rows):
+        match = browser_event.match(event.details or "") if event.source == "browser" else None
+        if not match:
+            grouped.append(event.to_dict())
+            continue
+
+        folder_id, folder_name = match.groups()
+        activity = event.file_activity or []
+        if not activity:
+            legacy = re.match(r"^(created|modified|deleted) (.+)$", (event.details or "")[match.end():])
+            if legacy:
+                activity = [{"operation": legacy.group(1), "path": legacy.group(2)}]
+        timestamp = event_timestamp(event)
+        key = folder_id.lower()
+        current = browser_groups.get(key)
+        if current is None or timestamp - current["last_timestamp"] > 2.5:
+            current = {
+                "id": f"browser-{key}-{event.id}",
+                "event_id": None,
+                "event_type": "file_activity",
+                "severity": "info",
+                "source": "browser",
+                "risk_score": 0,
+                "folder_name": folder_name,
+                "created_at": event.created_at.isoformat(),
+                "last_timestamp": timestamp,
+                "file_activity": [],
+                "counts": {"created": 0, "modified": 0, "deleted": 0},
+            }
+            browser_groups[key] = current
+            grouped.append(current)
+        current["last_timestamp"] = timestamp
+        current["created_at"] = event.created_at.isoformat()
+        for change in activity:
+            operation = change.get("operation")
+            path = change.get("path")
+            if operation not in current["counts"] or not isinstance(path, str) or not path:
+                continue
+            current["file_activity"].append({"operation": operation, "path": path})
+            current["counts"][operation] += 1
+
+    result = []
+    for item in grouped:
+        if item.get("source") == "browser" and item.get("event_type") == "file_activity":
+            counts = item.pop("counts")
+            item.pop("last_timestamp", None)
+            item["file_activity"].sort(key=lambda change: (change["operation"], change["path"].casefold()))
+            total = len(item["file_activity"])
+            item["details"] = (
+                f"Browser folder ({item.pop('folder_name')}): {total} changes "
+                f"({counts['created']} created, {counts['modified']} modified, {counts['deleted']} deleted)."
+            )
+            result.append(item)
+        else:
+            result.append(item)
+    result.sort(key=lambda item: item["created_at"], reverse=True)
+    return jsonify({"events": result[:limit]})
 
 
 @api.get("/alerts")
