@@ -47,7 +47,7 @@
             <div>
                 <span class="account-chip"><i class="bi bi-shield-check"></i>Authenticated workspace</span>
                 <h1 class="dashboard-heading mt-3 mb-2">Welcome, {{ current_user.full_name or current_user.email }}.</h1>
-                <p class="muted mb-0">Monitor a folder in this browser, evaluate the SILRAD benchmark, or review saved activity.</p>
+                <p class="muted mb-0">Monitor folders in this browser, on the app server, or on connected Windows devices. SILRAD is a separate offline benchmark.</p>
             </div>
         </div>
 
@@ -60,7 +60,7 @@
         <nav class="dashboard-tabs" role="tablist" aria-label="Dashboard pages">
             <button class="dashboard-tab" type="button" role="tab" id="tab-start" :aria-selected="activeTab === 'start'" aria-controls="panel-start" @click="activeTab='start'"><i class="bi bi-compass me-1"></i>Start here</button>
             <button class="dashboard-tab" type="button" role="tab" id="tab-monitor" :aria-selected="activeTab === 'monitor'" aria-controls="panel-monitor" @click="activeTab='monitor'"><i class="bi bi-folder2-open me-1"></i>Monitor files</button>
-            <button class="dashboard-tab" type="button" role="tab" id="tab-benchmark" :aria-selected="activeTab === 'benchmark'" aria-controls="panel-benchmark" @click="activeTab='benchmark'"><i class="bi bi-bar-chart me-1"></i>SILRAD benchmark</button>
+            <button class="dashboard-tab" type="button" role="tab" id="tab-benchmark" :aria-selected="activeTab === 'benchmark'" aria-controls="panel-benchmark" @click="activeTab='benchmark'"><i class="bi bi-bar-chart me-1"></i>Offline SILRAD benchmark</button>
             <button class="dashboard-tab" type="button" role="tab" id="tab-alerts" :aria-selected="activeTab === 'alerts'" aria-controls="panel-alerts" @click="activeTab='alerts'"><i class="bi bi-bell me-1"></i>Alerts</button>
             <button class="dashboard-tab" type="button" role="tab" id="tab-account" :aria-selected="activeTab === 'account'" aria-controls="panel-account" @click="activeTab='account'"><i class="bi bi-gear me-1"></i>Email & history</button>
         </nav>
@@ -70,7 +70,7 @@
             <div class="col-sm-6 col-xl-3">
                 <article class="status-card">
                     <div class="d-flex justify-content-between"><span class="status-icon"><i class="bi bi-activity"></i></span><span class="state-badge" :class="status.running ? 'running' : ''"><span class="state-dot"></span><span x-text="status.connection_state"></span></span></div>
-                    <div class="metric-value mt-4" x-text="status.running ? 'Live' : 'Offline'"></div><span class="muted small">Application server monitor</span>
+                    <div class="metric-value mt-4" x-text="status.running ? 'Live' : status.connection_state === 'In use by another account' ? 'In use' : 'Stopped'"></div><span class="muted small">Application server monitor</span>
                 </article>
             </div>
             <div class="col-sm-6 col-xl-3">
@@ -83,16 +83,18 @@
             <div class="col-sm-6 col-xl-3">
                 <article class="status-card">
                     <div class="d-flex justify-content-between"><span class="status-icon"><i class="bi bi-collection"></i></span><span class="state-badge">Persisted</span></div>
-                    <div class="metric-value mt-4" x-text="eventCount"></div><span class="muted small">File activity events</span>
-                    <div class="small muted mt-2"><span x-text="status.process_count"></span> processes on application host</div>
+                    <div class="metric-value mt-4" x-text="eventCount"></div><span class="muted small">Recorded file activity events · this account</span>
+                    <div class="small muted mt-2">Browser folder: <strong x-text="folderWatching ? 'Watching' : 'Not watching'"></strong></div>
+                    <div class="small muted">Windows agents: <strong x-text="`${onlineDeviceCount()} online / ${devices.length} registered`"></strong></div>
+                    <div class="small muted"><span x-text="status.process_count"></span> app-server processes</div>
                 </article>
             </div>
             <div class="col-sm-6 col-xl-3">
                 <article class="status-card">
                     <div class="d-flex justify-content-between"><span class="status-icon"><i class="bi bi-bell"></i></span><span class="state-badge" :class="alertCount ? '' : 'running'" x-text="alertCount ? 'Review' : 'Clear'"></span></div>
-                    <div class="metric-value mt-4"><span x-text="status.last_risk_score"></span><small class="fs-6">/100</small></div><span class="muted small">Rolling file activity score</span>
-                    <div class="small muted mt-1">Rule-based indicator, not a probability</div>
-                    <div class="small muted mt-2"><span x-text="status.monitored_files || 0"></span> files currently in scope</div>
+                    <div class="metric-value mt-4"><span x-text="status.last_risk_score"></span><small class="fs-6">/100</small></div><span class="muted small">Server-folder activity score</span>
+                    <div class="small muted mt-1">Rule-based indicator, not a malware probability</div>
+                    <div class="small muted mt-2"><span x-text="status.monitored_files || 0"></span> files in the server folder</div>
                 </article>
             </div>
         </div>
@@ -108,7 +110,7 @@
                 <li>Review the action and path under <strong>Recent activity</strong>, then stop monitoring.</li>
             </ol>
         </section>
-        <p class="small muted">SILRAD is a separate offline dataset test. A live activity alert asks for review; it does not confirm ransomware. Server-folder files can be quarantined manually from an alert or automatically when you enable that option.</p>
+        <p class="small muted">SILRAD is an offline benchmark on labeled dataset events; it does not power live alerts. Live alerts report unusual file activity and do not confirm ransomware. Selected-folder and Windows-agent quarantine are manual; server-folder automatic quarantine is optional.</p>
         </section>
 
         <section id="panel-monitor" role="tabpanel" aria-labelledby="tab-monitor" x-show="activeTab === 'monitor'" x-cloak>
@@ -195,7 +197,7 @@
 
         <section id="panel-benchmark" role="tabpanel" aria-labelledby="tab-benchmark" x-show="activeTab === 'benchmark'" x-cloak>
         <section class="panel p-4 mb-4" aria-labelledby="silrad-heading">
-            <h2 id="silrad-heading" class="h4">SILRAD held-out benchmark</h2>
+            <h2 id="silrad-heading" class="h4">Offline SILRAD benchmark</h2>
             <p class="small muted">This offline benchmark evaluates SILRAD’s published, labeled Sysmon events with an incremental Adaptive Random Forest. It predicts each test event before learning that row’s known label for the next event. The benchmark does not power live folder alerts.</p>
             <div class="d-flex flex-wrap align-items-center gap-3">
                 <button type="button" class="btn-brand" @click="performAction('/api/runs/silrad')" :disabled="busy || !silrad.ready">Run held-out test</button>
@@ -251,7 +253,7 @@
         <div x-show="activeTab === 'monitor'" x-cloak>
         <section class="panel mb-4">
                     <div class="p-4 d-flex justify-content-between align-items-start border-bottom" style="border-color:var(--line)!important">
-                        <div><small class="muted">RECENT CHANGES</small><h2 id="events-heading" class="h4 mt-1 mb-1">Recent activity</h2><span class="muted small">Updated automatically every few seconds</span></div>
+                        <div><small class="muted">RECORDED FILE CHANGES</small><h2 id="events-heading" class="h4 mt-1 mb-1">Recent activity</h2><span class="muted small">A recorded file change is not a confirmed threat. Updated automatically every few seconds.</span></div>
                         <button class="theme-toggle" type="button" @click="refreshAll" :disabled="busy" aria-label="Refresh data"><i class="bi bi-arrow-clockwise" :class="busy ? 'd-inline-block spin' : ''"></i></button>
                     </div>
 
@@ -267,7 +269,7 @@
                             <article class="feed-row">
                                 <span class="feed-icon" :class="event.severity"><i class="bi" :class="event.severity === 'warning' ? 'bi-exclamation-triangle' : 'bi-folder-check'"></i></span>
                                 <div class="activity-event-content">
-                                    <strong class="d-block" x-text="event.event_type === 'file_activity' ? 'File changes detected' : event.event_type.replaceAll('_', ' ')"></strong>
+                                    <strong class="d-block" x-text="event.event_type === 'file_activity' ? 'File activity recorded' : event.event_type.replaceAll('_', ' ')"></strong>
                                     <p class="muted small mb-2" x-text="eventSummary(event)"></p>
                                     <p class="small muted mb-2" x-show="event.source === 'agent'">Windows endpoint agent</p>
                                     <div class="activity-file-list" x-show="eventFiles(event).length">
@@ -291,7 +293,7 @@
                                     </div>
                                     <span class="muted d-block mt-2" style="font-size:.72rem" x-text="formatDate(event.created_at)"></span>
                                 </div>
-                                <span class="state-badge" x-text="event.severity === 'warning' ? 'Review activity' : 'Activity recorded'"></span>
+                                <span class="state-badge" x-text="event.severity === 'warning' ? 'Review activity' : 'Recorded'"></span>
                             </article>
                         </template>
                     </div>
@@ -890,6 +892,7 @@
                     this.endpointQuarantine = data.quarantine;
                 } catch (error) { this.showFeedback(error.message, 'error'); }
             },
+            onlineDeviceCount() { return this.devices.filter(device => device.status === 'online').length; },
             endpointDevice(deviceId) { return this.devices.find(device => device.device_id === deviceId); },
             endpointForAlert(alert) {
                 const match = (alert.details || '').match(/^Agent ([A-Za-z0-9._-]{1,64}) reported/);
