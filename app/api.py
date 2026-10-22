@@ -12,7 +12,7 @@ from sqlalchemy import or_
 from werkzeug.datastructures import FileStorage
 
 from .extensions import csrf, db
-from .models import Alert, MonitoringEvent, AnalysisRun, QuarantineItem, User, AuditLog
+from .models import Alert, MonitoringEvent, AnalysisRun, QuarantineItem, User, AuditLog, utc_isoformat
 from .audit import record_audit
 from .runs import start_run, execute
 
@@ -653,7 +653,7 @@ def list_events():
                 "source": "browser",
                 "risk_score": 0,
                 "folder_name": folder_name,
-                "created_at": event.created_at.isoformat(),
+                "created_at": utc_isoformat(event.created_at),
                 "last_timestamp": timestamp,
                 "file_activity": [],
                 "counts": {"created": 0, "modified": 0, "deleted": 0},
@@ -661,7 +661,7 @@ def list_events():
             browser_groups[key] = current
             grouped.append(current)
         current["last_timestamp"] = timestamp
-        current["created_at"] = event.created_at.isoformat()
+        current["created_at"] = utc_isoformat(event.created_at)
         for change in activity:
             operation = change.get("operation")
             path = change.get("path")

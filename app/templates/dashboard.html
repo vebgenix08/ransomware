@@ -691,7 +691,15 @@
             },
             formatDate(value) {
                 if (!value) return 'Not available';
-                return new Intl.DateTimeFormat(undefined, {dateStyle: 'medium', timeStyle: 'short'}).format(new Date(value));
+                return new Intl.DateTimeFormat('en-IN', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    timeZone: 'Asia/Kolkata',
+                    timeZoneName: 'short'
+                }).format(new Date(value));
             },
             formatDetails(details) {
                 return Object.entries(details || {}).map(([key, value]) => {
