@@ -1,9 +1,11 @@
 @echo off
 setlocal
-title RansomShield Random Folder Activity Demo
+title RansomShield Six-Step Activity Demo
 
-echo RansomShield random folder activity demo
-echo This creates a new, uniquely named test folder. It does not edit your existing files.
+echo RansomShield six-step folder activity demo
+echo It changes files only inside a new, uniquely named test folder.
+echo The six steps are: create, modify a few, modify more, create again, delete some, and mixed activity.
+echo Keep the server-folder monitor running while you follow the prompts.
 echo.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0demo_folder_activity.ps1" %*
 if errorlevel 1 (
