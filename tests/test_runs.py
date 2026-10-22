@@ -22,6 +22,7 @@ class RunTests(unittest.TestCase):
         self.app = create_app(dict(TESTING=True, WTF_CSRF_ENABLED=False, SQLALCHEMY_DATABASE_URI="sqlite://",
                                    MONITOR_TARGET_PATH=self.root/'decoy', QUARANTINE_PATH=self.root/'quarantine',
                                    RUNS_PATH=self.root/'runs', RESPONSE_WEBHOOK_URL="", RESPONSE_EMAIL_TO="",
+                                   SMTP_HOST="", SMTP_USERNAME="", SMTP_PASSWORD="", RESPONSE_EMAIL_FROM="",
                                    AUTO_QUARANTINE=True))
         self.context = self.app.app_context()
         self.context.push()
@@ -171,6 +172,53 @@ class RunTests(unittest.TestCase):
             self.assertEqual(self.client.post('/api/monitor/start').status_code, 409)
             self.assertEqual(self.client.post('/api/monitor/stop').status_code, 403)
 
+    def test_manual_quarantine_moves_only_alert_listed_server_folder_file_and_restores(self):
+        root = self.app.extensions['monitoring_service'].target_path
+        source = root / 'safe-demo' / 'sample.txt'
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text('manual quarantine sample', encoding='utf-8')
+        alert = Alert(user_id=self.user.id, title='Server burst', details='Review only',
+                      severity='medium', risk_score=60, model_version='rolling-file-burst-v1',
+                      rule_trace=[{'signal': 'affected_files', 'value': [
+                          {'path': 'safe-demo/sample.txt', 'operations': ['modified']}
+                      ]}])
+        db.session.add(alert)
+        db.session.commit()
+        from app.response import respond
+        respond(self.app, alert, root, {'safe-demo/sample.txt'}, quarantine_allowed=False)
+
+        result = self.client.post(f'/api/alerts/{alert.id}/quarantine',
+                                  json={'path': 'safe-demo/sample.txt'})
+        self.assertEqual(result.status_code, 200, result.json)
+        self.assertFalse(source.exists())
+        self.assertEqual(Path(result.json['item']['quarantine_path']).read_text(encoding='utf-8'),
+                         'manual quarantine sample')
+        self.assertEqual(result.json['alert']['response']['files'][0]['status'], 'quarantined')
+
+        restored = self.client.post(f"/api/quarantine/{result.json['item']['id']}/restore")
+        self.assertEqual(restored.status_code, 200, restored.json)
+        self.assertEqual(source.read_text(encoding='utf-8'), 'manual quarantine sample')
+
+    def test_manual_quarantine_rejects_unlisted_and_browser_folder_paths(self):
+        root = self.app.extensions['monitoring_service'].target_path
+        source = root / 'not-listed.txt'
+        source.write_text('keep', encoding='utf-8')
+        for model_version, allowed_path in (
+                ('rolling-file-burst-v1', 'different.txt'),
+                ('browser-folder-burst-v1', 'not-listed.txt')):
+            alert = Alert(user_id=self.user.id, title='Burst', details='Review only',
+                          severity='medium', risk_score=60, model_version=model_version,
+                          rule_trace=[{'signal': 'affected_files', 'value': [{'path': allowed_path}]}])
+            db.session.add(alert)
+            db.session.commit()
+            from app.response import respond
+            respond(self.app, alert, root, {allowed_path}, quarantine_allowed=False)
+            result = self.client.post(f'/api/alerts/{alert.id}/quarantine',
+                                      json={'path': 'not-listed.txt'})
+            self.assertEqual(result.status_code, 422)
+        self.assertEqual(source.read_text(encoding='utf-8'), 'keep')
+        self.assertEqual(QuarantineItem.query.count(), 0)
+
     def test_model_unavailable_records_failure(self):
         with patch('app.runs.evaluate', side_effect=ValueError('Model unavailable')):
             response = self.upload(self.fixture(True))
@@ -181,8 +229,8 @@ class RunTests(unittest.TestCase):
         self.app.config['SMTP_PASSWORD'] = 'never-expose-me'
         dashboard = self.client.get('/dashboard')
         self.assertEqual(dashboard.status_code, 200)
-        self.assertIn('Start here: test and use RansomShield', dashboard.text)
-        self.assertIn('RansomShield Online Benchmark', dashboard.text)
+        self.assertIn('Start here', dashboard.text)
+        self.assertIn('SILRAD benchmark', dashboard.text)
         self.assertNotIn('Published MLRan evaluation', dashboard.text)
         self.assertNotIn('never-expose-me', self.client.get('/api/notifications').text)
         self.assertIn('Run history', dashboard.text)
@@ -405,7 +453,7 @@ class RunTests(unittest.TestCase):
         self.assertIn("url.pathname.startsWith('/api/')", worker.text)
         worker.close()
         offline = self.client.get('/offline')
-        self.assertIn('RansomShield is offline', offline.text)
+        self.assertIn('Your workspace needs a connection.', offline.text)
         offline.close()
 
     def test_monitor_target_starts_without_synthetic_seed_files(self):

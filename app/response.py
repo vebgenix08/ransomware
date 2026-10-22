@@ -352,6 +352,102 @@ def respond(app, alert, root, affected, quarantine_allowed=True):
     return action
 
 
+def quarantine_alert_file(app, alert, monitored_root: Path, relative_name: str) -> QuarantineItem:
+    """Manually move one alert-listed server-folder file into quarantine.
+
+    This is deliberately separate from the automatic response path: the live
+    burst rule is not a malware verdict, so a person must select each file.
+    Browser-folder alerts are metadata-only and are not eligible.
+    """
+    if alert.model_version != "rolling-file-burst-v1":
+        raise ValueError("Manual quarantine is available only for server-folder alerts.")
+
+    normalized_name = str(relative_name).replace("\\", "/")
+    relative = Path(normalized_name)
+    if (not normalized_name or len(normalized_name) > 400 or relative.is_absolute()
+            or any(part in {"", ".", ".."} for part in normalized_name.split("/"))):
+        raise ValueError("Choose a safe relative file path from this alert.")
+    normalized_name = relative.as_posix()
+
+    affected_signal = next((entry for entry in (alert.rule_trace or [])
+                            if isinstance(entry, dict) and entry.get("signal") == "affected_files"), None)
+    allowed_names = {
+        Path(str(entry.get("path", "")).replace("\\", "/")).as_posix()
+        for entry in (affected_signal or {}).get("value", [])
+        if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+    }
+    if normalized_name not in allowed_names:
+        raise ValueError("That file is not listed in this alert.")
+
+    root = Path(monitored_root).resolve(strict=True)
+    configured_root = Path(app.config["MONITOR_TARGET_PATH"]).resolve(strict=True)
+    if root != configured_root:
+        raise ValueError("Files can be quarantined only from the configured server folder.")
+    quarantine = Path(app.config["QUARANTINE_PATH"]).resolve()
+    if quarantine == root or root in quarantine.parents or quarantine in root.parents:
+        raise ValueError("Quarantine and monitored directories must be separate.")
+
+    source = root / relative
+    resolved = source.resolve(strict=True)
+    if root not in resolved.parents:
+        raise ValueError("File path escapes the monitored folder.")
+    for part in (source, *source.parents):
+        if part == root:
+            break
+        info = part.lstat()
+        if part.is_symlink() or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise ValueError("Links and reparse points cannot be quarantined.")
+    info = source.stat()
+    if not stat.S_ISREG(info.st_mode):
+        raise ValueError("Only regular files can be quarantined.")
+
+    action = ResponseAction.query.filter_by(alert_id=alert.id).first()
+    if action is None:
+        raise ValueError("This alert has no response record.")
+    result = dict(action.result or {})
+    file_results = list(result.get("files") or [])
+    if any(item.get("source") == normalized_name and item.get("status") == "quarantined"
+           for item in file_results):
+        raise ValueError("This file is already quarantined for this alert.")
+
+    target = quarantine / str(alert.id) / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.parent.resolve() != target.parent:
+        raise ValueError("Quarantine destination must not contain links.")
+    if target.exists():
+        raise ValueError("A file already exists at the quarantine destination.")
+
+    digest = sha256_file(source)
+    item = QuarantineItem(
+        alert_id=alert.id,
+        original_path=normalized_name,
+        quarantine_path=str(target),
+        sha256=digest,
+        size_bytes=info.st_size,
+    )
+    os.rename(source, target)
+    try:
+        db.session.add(item)
+        file_results.append({
+            "source": normalized_name,
+            "status": "quarantined",
+            "destination": str(target),
+            "sha256": digest,
+            "manual": True,
+        })
+        result["files"] = file_results
+        result["quarantine"] = "manually_quarantined"
+        action.result = result
+        flag_modified(action, "result")
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        if target.exists() and not source.exists():
+            os.rename(target, source)
+        raise
+    return item
+
+
 def restore_quarantine(app, item: QuarantineItem, monitored_root: Path) -> QuarantineItem:
     """Move one quarantined file back, verifying identity and destination first.
 

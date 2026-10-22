@@ -99,7 +99,7 @@
                     ('bi-activity', 'Collect folder activity', 'Observe file creates, changes, and deletes in one configured directory. The app does not attribute changes to a process.'),
                     ('bi-funnel', 'Apply live burst rules', 'Count distinct file changes in a rolling 30-second window. The activity score is a heuristic, not a malware probability.'),
                     ('bi-diagram-3', 'Run the RansomShield Online Benchmark', 'Test an incremental model on a published Sysmon stream. The benchmark uses SILRAD data and does not drive live alerts.'),
-                    ('bi-bell', 'Review evidence', 'See the source, observed counts, model results, and downloadable reports. Live burst alerts do not move files automatically.')
+                    ('bi-bell', 'Review evidence', 'See the source, observed counts, model results, and downloadable reports. Live burst alerts never move files automatically; selected server-folder files can be quarantined manually.')
                 ] %}
                 {% for icon, title, copy in steps %}
                     <div class="col-md-6 col-xl-3">

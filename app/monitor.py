@@ -114,6 +114,7 @@ class MonitoringService:
         self._stop_event = Event()
         self._lock = Lock()
         self._snapshot: Dict[str, FileState] = {}
+        self._suppressed_delete_paths: Dict[str, float] = {}
         self._queue: Queue = Queue(maxsize=QUEUE_LIMIT)
         self._collector = _WatchCollector(self)
         self._owner_id: Optional[int] = None
@@ -148,6 +149,13 @@ class MonitoringService:
     def owned_by(self, user_id: int) -> bool:
         with self._lock:
             return self._owner_id == user_id
+
+    def note_quarantined_file(self, relative_path: str) -> None:
+        """Avoid reporting the monitor's own quarantine move as user activity."""
+        relative = Path(relative_path).as_posix()
+        with self._lock:
+            self._snapshot.pop(relative, None)
+            self._suppressed_delete_paths[relative] = monotonic() + 5.0
 
     def start(self, owner_id: Optional[int] = None) -> bool:
         with self._lock:
@@ -274,6 +282,16 @@ class MonitoringService:
         for path in deleted:
             modified.discard(path)
 
+        now_monotonic = monotonic()
+        with self._lock:
+            suppressed = {path for path, expires in self._suppressed_delete_paths.items()
+                          if expires >= now_monotonic}
+            self._suppressed_delete_paths = {
+                path: expires for path, expires in self._suppressed_delete_paths.items()
+                if expires >= now_monotonic
+            }
+        deleted.difference_update(suppressed)
+
         cpu_percent = round(psutil.cpu_percent(interval=None), 1)
         memory_percent = round(psutil.virtual_memory().percent, 1)
         process_count = len(psutil.pids())
@@ -281,7 +299,6 @@ class MonitoringService:
         touched: Set[str] = created | modified | deleted
         directories_touched = {Path(path).parts[0] for path in touched if Path(path).parts}
         operation_rate = round(file_changes / max(self.interval_seconds, 0.1), 2)
-        now_monotonic = monotonic()
         if file_changes:
             self._activity_window.append((now_monotonic, frozenset(created), frozenset(modified), frozenset(deleted)))
         cutoff = now_monotonic - ACTIVITY_WINDOW_SECONDS

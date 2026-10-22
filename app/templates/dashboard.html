@@ -108,7 +108,7 @@
                 <li>Review the action and path under <strong>Recent activity</strong>, then stop monitoring.</li>
             </ol>
         </section>
-        <p class="small muted">SILRAD is a separate offline dataset test. A live activity alert asks for review; it does not confirm ransomware or quarantine files.</p>
+        <p class="small muted">SILRAD is a separate offline dataset test. A live activity alert asks for review; it does not confirm ransomware. You choose whether to manually quarantine an existing file from a server-folder alert.</p>
         </section>
 
         <section id="panel-monitor" role="tabpanel" aria-labelledby="tab-monitor" x-show="activeTab === 'monitor'" x-cloak>
@@ -149,7 +149,7 @@
                 </section>
             </div>
         </div>
-        <p class="small muted mb-3">Alert rule: 10 deletions, 20 modifications, or 30 changed files with at least 10 modifications/deletions in 30 seconds. Alerts ask for review and do not move files.</p>
+        <p class="small muted mb-3">Alert rule: 10 deletions, 20 modifications, or 30 changed files with at least 10 modifications/deletions in 30 seconds. Alerts never move files automatically. You can manually quarantine a selected existing file listed in a server-folder alert; browser-picked folders and dataset results cannot be quarantined.</p>
 
 
 
@@ -269,11 +269,19 @@
                             <details class="small mb-2" x-show="(alert.rule_trace || []).some(item => item.signal === 'affected_files' && item.value?.length)">
                                 <summary>Changed files (paths relative to monitored folder)</summary>
                                 <div class="table-responsive mt-2">
-                                    <table class="table table-sm align-middle mb-0">
-                                        <thead><tr><th scope="col">Activity</th><th scope="col">Path</th></tr></thead>
+                            <table class="table table-sm align-middle mb-0">
+                                        <thead><tr><th scope="col">Activity</th><th scope="col">Path</th><th scope="col">Action</th></tr></thead>
                                         <tbody>
                                             <template x-for="file in (((alert.rule_trace || []).find(item => item.signal === 'affected_files') || {}).value || [])" :key="file.path">
-                                                <tr><td x-text="(file.operations || ['changed']).join(', ')"></td><td class="text-break" x-text="file.path"></td></tr>
+                                                <tr>
+                                                    <td x-text="(file.operations || ['changed']).join(', ')"></td>
+                                                    <td class="text-break" x-text="file.path"></td>
+                                                    <td>
+                                                        <button class="btn-outline-custom btn-sm py-1 px-2" type="button" x-show="isServerFolderAlert(alert) && !isQuarantined(alert, file.path)" @click="quarantineAlertFile(alert.id, file.path)" :disabled="busy">Quarantine file</button>
+                                                        <span class="muted small" x-show="isQuarantined(alert, file.path)">Quarantined</span>
+                                                        <span class="muted small" x-show="!isServerFolderAlert(alert)">Server folder only</span>
+                                                    </td>
+                                                </tr>
                                             </template>
                                         </tbody>
                                     </table>
@@ -318,7 +326,7 @@
                 <div><small class="muted">QUARANTINE HISTORY</small><h2 class="h4 mt-1 mb-0">Previously contained files</h2></div>
                 <button class="theme-toggle" type="button" @click="loadQuarantine" :disabled="busy" aria-label="Refresh quarantine"><i class="bi bi-arrow-clockwise"></i></button>
             </div>
-            <p class="px-4 pt-3 muted small mb-0">The current live-monitor and CSV workflows do not move files. If a prior authorized action created a record, restoring verifies its hash, original path and destination first.</p>
+            <p class="px-4 pt-3 muted small mb-0">Files are moved only after you choose Quarantine file on a server-folder alert and confirm. Browser-picked folder activity and dataset results never move files. Restore checks the file hash and original path before returning it.</p>
             <div class="px-4 pb-3" x-show="quarantine.length">
                 <template x-for="item in quarantine" :key="item.id">
                     <article class="feed-row">
@@ -332,7 +340,7 @@
                     </article>
                 </template>
             </div>
-            <div class="empty-state" x-show="!quarantine.length"><div><span class="status-icon mx-auto mb-3"><i class="bi bi-archive"></i></span><h3 class="h5">No quarantine records</h3><p class="muted small mb-0">Live activity and CSV evaluations are currently review-only and do not move files.</p></div></div>
+            <div class="empty-state" x-show="!quarantine.length"><div><span class="status-icon mx-auto mb-3"><i class="bi bi-archive"></i></span><h3 class="h5">No quarantine records</h3><p class="muted small mb-0">Choose Quarantine file on a server-folder alert to move a selected file here. You can restore it later.</p></div></div>
         </section>
         </section>
     </div>
@@ -625,6 +633,22 @@
             async restoreItem(itemId) {
                 const result = await this.performAction(`/api/quarantine/${itemId}/restore`);
                 if (result && result.ok) await this.loadQuarantine();
+            },
+            isServerFolderAlert(alert) {
+                return alert.model_version === 'rolling-file-burst-v1';
+            },
+            isQuarantined(alert, path) {
+                const normalize = value => String(value || '').replaceAll('\\', '/');
+                return (alert.response?.files || []).some(file =>
+                    file.status === 'quarantined' && normalize(file.source) === normalize(path));
+            },
+            async quarantineAlertFile(alertId, path) {
+                if (!window.confirm(`Move "${path}" from the server folder to quarantine? You can restore it later.`)) return;
+                await this.performAction(`/api/alerts/${alertId}/quarantine`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({path})
+                });
             },
             showFeedback(message, type = 'info') {
                 this.feedback = message;

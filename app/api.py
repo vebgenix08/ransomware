@@ -503,6 +503,33 @@ def list_quarantine():
     return jsonify(items=[item.to_dict() for item in items])
 
 
+@api.post("/alerts/<int:alert_id>/quarantine")
+@login_required
+def quarantine_alert_file_route(alert_id: int):
+    alert = db.get_or_404(Alert, alert_id)
+    check_alert_owner(alert_id)
+    if alert.resolved_at is not None:
+        return jsonify(ok=False, message="Reopen the alert before quarantining a file."), 409
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or not isinstance(body.get("path"), str):
+        return jsonify(ok=False, message="Choose a file path listed in this alert."), 400
+
+    from .response import quarantine_alert_file
+    monitored_root = Path(current_app.config["MONITOR_TARGET_PATH"])
+    try:
+        item = quarantine_alert_file(current_app, alert, monitored_root, body["path"])
+    except (OSError, ValueError) as exc:
+        return jsonify(ok=False, message=str(exc)), 422
+
+    monitor = get_monitor()
+    monitor.note_quarantined_file(item.original_path)
+    record_audit("file_quarantined", alert_id=alert.id, path=item.original_path,
+                 scope="server_folder")
+    db.session.commit()
+    return jsonify(ok=True, message=f"Moved {item.original_path} to quarantine. You can restore it from Email & history.",
+                   item=item.to_dict(), alert=alert.to_dict())
+
+
 @api.post("/quarantine/<int:item_id>/restore")
 @login_required
 def restore_item(item_id: int):
