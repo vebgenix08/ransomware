@@ -241,6 +241,13 @@ class RunTests(unittest.TestCase):
         self.assertIn('Resolve', dashboard.text)
         self.assertIn('Severity', dashboard.text)
         self.assertIn('Turn off email alerts', dashboard.text)
+        self.assertIn('Device', dashboard.text)
+        self.assertIn('Source', dashboard.text)
+        self.assertIn('Action', dashboard.text)
+        self.assertNotIn('datetime-local', dashboard.text)
+        self.assertIn('Quarantine in selected folder', dashboard.text)
+        self.assertIn('RansomShield Quarantine', dashboard.text)
+        self.assertIn("showDirectoryPicker({mode: 'readwrite'})", dashboard.text)
 
     def test_email_alert_preference_is_editable_audited_and_respected(self):
         response = self.client.post('/api/notifications/email', json={'enabled': False})
@@ -395,6 +402,7 @@ class RunTests(unittest.TestCase):
         self.assertEqual(MonitoringEvent.query.filter_by(source='browser', user_id=self.user.id).count(), 20)
         alert = Alert.query.filter_by(model_version='browser-folder-burst-v1', user_id=self.user.id).one()
         self.assertIn('20 distinct file changes', alert.details)
+        self.assertIn({'signal': 'selected_folder_id', 'value': folder_id}, alert.rule_trace)
         self.assertTrue(alert.responses[0].completed)
         duplicate = self.client.post('/api/browser-folder/events', json={"folder_id": folder_id, "events": events})
         self.assertEqual(duplicate.status_code, 202)
@@ -464,6 +472,9 @@ class RunTests(unittest.TestCase):
         self.assertEqual(status.status_code, 200)
         self.assertTrue(status.json['ready'])
         self.assertAlmostEqual(status.json['metrics']['recall'], run['result']['metrics']['recall'])
+        confusion = run['result']['confusion_matrix']
+        expected_fnr = confusion['fn'] / (confusion['fn'] + confusion['tp'])
+        self.assertAlmostEqual(status.json['metrics']['false_negative_rate'], expected_fnr)
         self.assertAlmostEqual(status.json['xgboost_comparison']['metrics']['recall'], 1986 / 19529)
 
     def test_silrad_status_and_server_prepare_action(self):

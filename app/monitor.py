@@ -519,6 +519,7 @@ class MonitoringService:
         owner_id: Optional[int] = None,
         file_activity=None,
         quarantine_candidates=None,
+        extra_rule_trace=None,
     ) -> None:
         if not self.app:
             return
@@ -535,6 +536,7 @@ class MonitoringService:
                         {"signal": "risk_score", "value": risk_score},
                         *([{"signal": "affected_files", "value": file_activity[:100]}]
                           if file_activity else []),
+                        *(extra_rule_trace or []),
                         {"signal": "policy", "value": "rolling-file-burst-v1"},
                     ],
                 )

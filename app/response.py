@@ -383,6 +383,11 @@ def quarantine_alert_file(app, alert, monitored_root: Path, relative_name: str) 
     }
     if normalized_name not in allowed_names:
         raise ValueError("That file is not listed in this alert.")
+    evidence = next((entry for entry in (affected_signal or {}).get("value", [])
+                     if isinstance(entry, dict)
+                     and Path(str(entry.get("path", "")).replace("\\", "/")).as_posix() == normalized_name), {})
+    if "deleted" in (evidence.get("operations") or []):
+        raise ValueError("This alert records a deletion for the path. Deleted files cannot be quarantined safely.")
 
     root = Path(monitored_root).resolve(strict=True)
     configured_root = Path(app.config["MONITOR_TARGET_PATH"]).resolve(strict=True)

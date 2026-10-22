@@ -126,7 +126,16 @@
                     <div class="mt-3"><span class="state-badge" :class="folderWatching ? 'running' : ''"><span class="state-dot"></span><span x-text="folderWatching ? 'Watching in this browser' : 'Not watching'"></span></span></div>
                     <p class="small mt-3 mb-0" :class="folderMessageType === 'error' ? 'text-danger' : 'muted'" x-text="folderMessage || 'Choose a folder to begin. Browser support notes are below.'" role="status"></p>
                     <p class="small muted mt-2 mb-0" x-show="folderName">Folder: <strong x-text="folderName"></strong> · <span x-text="folderFileCount"></span> files</p>
-                    <details class="small mt-3"><summary>Browser support and privacy</summary><p class="muted mt-2 mb-0">This feature needs the browser’s folder-access API. The page checks every five seconds and sends file paths and basic metadata, not file contents. Brave may disable the API; Chrome or Edge is the simplest option.</p></details>
+                    <div class="mt-3" x-show="folderQuarantineRecords.length">
+                        <strong class="small">Quarantined in this selected folder</strong>
+                        <template x-for="item in folderQuarantineRecords" :key="item.id">
+                            <div class="feed-row py-2">
+                                <div class="min-w-0"><span class="small d-block text-break" x-text="item.original_path"></span><span class="muted" style="font-size:.72rem" x-text="item.status === 'restored' ? 'Restored ' + formatDate(item.restored_at) : item.status === 'quarantined' ? 'Quarantined locally · ' + item.size_bytes + ' bytes · SHA-256 ' + item.sha256.slice(0, 16) + '…' : 'Needs review · file was not changed automatically'"></span></div>
+                                <button class="btn-outline-custom btn-sm py-1 px-2" type="button" @click="restoreBrowserFile(item)" :disabled="folderBusy || !folderHandle || item.status !== 'quarantined'" x-text="item.status === 'restored' ? 'Restored' : 'Restore file'"></button>
+                            </div>
+                        </template>
+                    </div>
+                    <details class="small mt-3"><summary>Browser support and privacy</summary><p class="muted mt-2 mb-0">Chrome or Edge asks for read/write access. Files move inside the selected folder to <code>RansomShield Quarantine</code>; file contents are not uploaded. Keep this page open to monitor. Brave may disable the folder-access API.</p></details>
                 </section>
             </div>
             <div class="col-lg-6">
@@ -160,9 +169,24 @@
                 <div class="col-12 col-lg-2"><button class="btn-outline-custom w-100" type="submit" :disabled="status.running || busy">Save settings</button></div>
                 <div class="col-12">
                     <label class="d-flex align-items-start gap-2"><input type="checkbox" class="form-check-input mt-1" x-model="monitorPolicy.auto_quarantine" @change="policyDirty=true" :disabled="status.running || busy"><span><strong>Automatically quarantine changed files when an alert triggers</strong><span class="small muted d-block">Moves created or modified files that still exist in the server folder. Deleted files cannot be moved. This can catch normal work by mistake; leave it off until you have tested your limits.</span></span></label>
-                    <p class="small muted mt-2 mb-0">Manual quarantine stays available from each server-folder alert. Browser-picked folders and benchmark data cannot be quarantined.</p>
+            <p class="small muted mt-2 mb-0">Server-folder quarantine can be manual or automatic. Selected-folder quarantine is manual and runs in the browser after read/write permission; dataset files are never quarantined.</p>
                 </div>
             </form>
+            <div class="mt-3 d-flex flex-wrap align-items-center gap-2">
+                <button type="button" class="btn-outline-custom" @click="simulatePolicy" :disabled="busy">Test limits on last 24 hours</button>
+                <span class="small muted" x-show="policySimulation" x-text="policySimulation ? `${policySimulation.would_alert_count} alert window(s) would have triggered from ${policySimulation.events_replayed} saved file changes. This does not tell false alarms from attacks.` : ''"></span>
+            </div>
+            <p class="small text-danger mt-2 mb-0" x-show="policySimulationError" x-text="policySimulationError"></p>
+        </section>
+
+        <section class="panel p-4 mb-4" aria-labelledby="devices-heading">
+            <div class="d-flex justify-content-between align-items-start gap-2"><div><span class="dashboard-section-kicker">Windows endpoint agents</span><h3 id="devices-heading" class="h5 mt-1">Devices</h3><p class="small muted">Online means the agent checked in within 90 seconds. The agent must be running to receive a quarantine or restore request.</p></div><button type="button" class="theme-toggle" @click="loadDevices" aria-label="Refresh device status"><i class="bi bi-arrow-clockwise"></i></button></div>
+            <div class="mt-3" x-show="devices.length">
+                <template x-for="device in devices" :key="device.device_id">
+                    <article class="feed-row"><span class="feed-icon" :class="device.status === 'online' ? '' : 'warning'"><i class="bi bi-laptop"></i></span><div><strong x-text="device.label"></strong><span class="state-badge ms-2" :class="device.status === 'online' ? 'running' : ''" x-text="device.status"></span><p class="muted small mb-0">Folder: <span x-text="device.folder_name || 'not provided'"></span> · Last check-in: <span x-text="formatDate(device.last_seen_at)"></span> · Pending requests: <span x-text="device.pending_commands"></span></p></div></article>
+                </template>
+            </div>
+            <p class="small muted mt-3 mb-0" x-show="!devices.length">No Windows endpoint agent has checked in yet. Configure the server token, then run the agent on the other computer.</p>
         </section>
 
 
@@ -183,7 +207,8 @@
             </div>
             <div class="small mt-3" x-show="silrad.ready">
                 <p class="mb-1">Prepared on server · <span x-text="silrad.training_rows"></span> training events · <span x-text="silrad.test_rows"></span> test-stream events · training-only threshold <span x-text="silrad.threshold"></span></p>
-                <p class="mb-1">Prequential online recall: <strong x-text="metric(silrad.metrics?.recall)"></strong> · false negatives: <strong x-text="silrad.confusion_matrix?.fn"></strong> · false positives: <strong x-text="silrad.confusion_matrix?.fp"></strong></p>
+                <p class="mb-1">Held-out test · precision <strong x-text="metric(silrad.metrics?.precision)"></strong> · recall <strong x-text="metric(silrad.metrics?.recall)"></strong> · F1 <strong x-text="metric(silrad.metrics?.f1)"></strong></p>
+                <p class="small muted mb-1">False alarms (false positives): <strong x-text="silrad.confusion_matrix?.fp"></strong> · missed ransomware events (false negatives): <strong x-text="silrad.confusion_matrix?.fn"></strong> · false-positive rate <strong x-text="metric(silrad.metrics?.false_positive_rate)"></strong> · false-negative rate <strong x-text="metric(silrad.metrics?.false_negative_rate)"></strong></p>
                 <p class="small muted mb-0" x-show="silrad.frozen_model_evaluation?.metrics">Frozen-model recall (no updates): <strong x-text="metric(silrad.frozen_model_evaluation?.metrics?.recall)"></strong>.</p>
                 <p class="small muted mb-0" x-show="silrad.xgboost_comparison?.metrics">Static XGBoost comparison (different learning method): recall <strong x-text="metric(silrad.xgboost_comparison?.metrics?.recall)"></strong> · false positives: <strong x-text="silrad.xgboost_comparison?.confusion_matrix?.fp"></strong> · threshold <span x-text="silrad.xgboost_comparison?.threshold"></span></p>
                 <p class="text-danger mt-2 mb-0" x-show="silrad.metrics?.recall < 0.5">This model misses many ransomware-labeled events. Use it for this dataset experiment only; it is not connected to live monitoring.</p>
@@ -207,7 +232,7 @@
                     <p class="small muted" x-show="run.result.transfer" x-text="run.result.transfer?.transport || ''"></p>
                     <p class="small">Model: <strong x-text="run.result.model_name || 'No prediction'"></strong></p>
                     <p class="my-2"><strong x-text="run.result.model_prediction || 'No prediction'"></strong> · Risk <span x-text="run.result.risk_score ?? '—'"></span>/100 · Incident <span x-text="run.incident?.id ?? 'None'"></span></p>
-                    <p class="small muted" x-show="run.result.dataset_schema === 'silrad'">Benchmark test events: <span x-text="run.result.windows"></span> · Precision: <span x-text="metric(run.result.metrics?.precision)"></span> · Recall: <span x-text="metric(run.result.metrics?.recall)"></span> · F1: <span x-text="metric(run.result.metrics?.f1)"></span> · False positives: <span x-text="run.result.confusion_matrix?.fp"></span></p>
+                    <p class="small muted" x-show="run.result.dataset_schema === 'silrad'">Labeled test events: <span x-text="run.result.windows"></span> · Precision: <span x-text="metric(run.result.metrics?.precision)"></span> · Recall: <span x-text="metric(run.result.metrics?.recall)"></span> · F1: <span x-text="metric(run.result.metrics?.f1)"></span> · False alarms: <span x-text="run.result.confusion_matrix?.fp"></span> · Missed ransomware events: <span x-text="run.result.confusion_matrix?.fn"></span></p>
                     <a class="small" x-show="run.result.dataset_schema === 'silrad'" :href="'/api/runs/' + run.id + '/predictions.csv'">Download benchmark row predictions</a>
                     <p class="small" x-show="run.result.error" x-text="run.result.error"></p>
                     <p class="small muted" x-show="run.result.observed_file_activity" x-text="'Recorded activity summary: ' + JSON.stringify(run.result.observed_file_activity || {})"></p>
@@ -230,6 +255,13 @@
                         <button class="theme-toggle" type="button" @click="refreshAll" :disabled="busy" aria-label="Refresh data"><i class="bi bi-arrow-clockwise" :class="busy ? 'd-inline-block spin' : ''"></i></button>
                     </div>
 
+                    <div class="p-3 border-bottom d-flex flex-wrap align-items-end gap-2" style="border-color:var(--line)!important">
+                        <label class="small">Device <select class="form-select form-select-sm" x-model="activityFilters.device" @change="loadEvents"><option value="">All devices</option><template x-for="device in devices" :key="device.device_id"><option :value="device.device_id" x-text="device.label"></option></template></select></label>
+                        <label class="small">Source <select class="form-select form-select-sm" x-model="activityFilters.source" @change="loadEvents"><option value="">All sources</option><option value="poll">Server folder</option><option value="browser">Browser folder</option><option value="agent">Windows agent</option></select></label>
+                        <label class="small">Action <select class="form-select form-select-sm" x-model="activityFilters.action" @change="loadEvents"><option value="">All actions</option><option value="created">Created</option><option value="modified">Modified</option><option value="deleted">Deleted</option></select></label>
+                        <a class="btn-outline-custom btn-sm text-decoration-none" :href="activityExportUrl()">Export CSV</a>
+                    </div>
+
                     <div class="px-4" x-show="events.length">
                         <template x-for="event in events" :key="event.id">
                             <article class="feed-row">
@@ -237,6 +269,7 @@
                                 <div class="activity-event-content">
                                     <strong class="d-block" x-text="event.event_type === 'file_activity' ? 'File changes detected' : event.event_type.replaceAll('_', ' ')"></strong>
                                     <p class="muted small mb-2" x-text="eventSummary(event)"></p>
+                                    <p class="small muted mb-2" x-show="event.source === 'agent'">Windows endpoint agent</p>
                                     <div class="activity-file-list" x-show="eventFiles(event).length">
                                         <div class="activity-file-heading"><span>Action</span><span>File path (inside monitored folder)</span></div>
                                         <template x-for="file in eventFiles(event).slice(0, 10)" :key="`${file.operation}:${file.path}`">
@@ -291,9 +324,17 @@
                                                     <td x-text="(file.operations || ['changed']).join(', ')"></td>
                                                     <td class="text-break" x-text="file.path"></td>
                                                     <td>
-                                                        <button class="btn-outline-custom btn-sm py-1 px-2" type="button" x-show="isServerFolderAlert(alert) && !isQuarantined(alert, file.path)" @click="quarantineAlertFile(alert.id, file.path)" :disabled="busy">Quarantine file</button>
+                                                        <button class="btn-outline-custom btn-sm py-1 px-2" type="button" x-show="isServerFolderAlert(alert) && !isQuarantined(alert, file.path) && !(file.operations || []).includes('deleted')" @click="quarantineAlertFile(alert.id, file.path)" :disabled="busy">Quarantine file</button>
+                                                        <button class="btn-outline-custom btn-sm py-1 px-2" type="button" x-show="isBrowserFolderAlert(alert) && folderMatchesAlert(alert) && !isBrowserQuarantined(alert, file.path) && !(file.operations || []).includes('deleted')" @click="quarantineBrowserFile(alert, file.path)" :disabled="folderBusy || !folderWatching">Quarantine in selected folder</button>
+                                                        <button class="btn-outline-custom btn-sm py-1 px-2" type="button" x-show="isEndpointAlert(alert) && !isEndpointQuarantined(alert, file.path) && !(file.operations || []).includes('deleted')" @click="quarantineEndpointFile(alert, file.path)" :disabled="busy || endpointForAlert(alert)?.status !== 'online'" x-text="endpointForAlert(alert)?.status === 'online' ? 'Quarantine on device' : 'Device offline'"></button>
                                                         <span class="muted small" x-show="isQuarantined(alert, file.path)">Quarantined</span>
-                                                        <span class="muted small" x-show="!isServerFolderAlert(alert)">Server folder only</span>
+                                                        <span class="muted small" x-show="isBrowserQuarantined(alert, file.path)">Quarantined in selected folder</span>
+                                                        <span class="muted small" x-show="(isServerFolderAlert(alert) || isEndpointAlert(alert)) && (file.operations || []).includes('deleted')">Deleted files cannot be quarantined</span>
+                                                        <span class="muted small" x-show="isBrowserFolderAlert(alert) && (file.operations || []).includes('deleted')">Deleted files cannot be quarantined</span>
+                                                        <span class="muted small" x-show="isBrowserFolderAlert(alert) && !folderMatchesAlert(alert)">Choose and watch the same folder to quarantine its files.</span>
+                                                        <span class="muted small" x-show="isEndpointQuarantined(alert, file.path)">Quarantine request queued or completed · check Devices</span>
+                                                        <span class="muted small" x-show="isEndpointRestored(alert, file.path)">Restored on device</span>
+                                                        <span class="muted small" x-show="!isServerFolderAlert(alert) && !isBrowserFolderAlert(alert) && !isEndpointAlert(alert)">This source cannot be quarantined</span>
                                                     </td>
                                                 </tr>
                                             </template>
@@ -340,7 +381,7 @@
                 <div><small class="muted">QUARANTINE HISTORY</small><h2 class="h4 mt-1 mb-0">Previously contained files</h2></div>
                 <button class="theme-toggle" type="button" @click="loadQuarantine" :disabled="busy" aria-label="Refresh quarantine"><i class="bi bi-arrow-clockwise"></i></button>
             </div>
-            <p class="px-4 pt-3 muted small mb-0">Server-folder files move only when you manually choose Quarantine file or enable automatic quarantine in Monitor files. Browser-picked folder activity and dataset results never move files. Restore checks the file hash and original path before returning it.</p>
+            <p class="px-4 pt-3 muted small mb-0">Server-folder files move to the configured server quarantine. Selected-folder files move locally into <code>RansomShield Quarantine</code> inside the selected folder and can be restored there. Dataset results never move files. Restore checks the file hash and original path before returning it.</p>
             <div class="px-4 pb-3" x-show="quarantine.length">
                 <template x-for="item in quarantine" :key="item.id">
                     <article class="feed-row">
@@ -355,6 +396,16 @@
                 </template>
             </div>
             <div class="empty-state" x-show="!quarantine.length"><div><span class="status-icon mx-auto mb-3"><i class="bi bi-archive"></i></span><h3 class="h5">No quarantine records</h3><p class="muted small mb-0">Manually quarantine a file from an alert or enable automatic quarantine in Monitor files. You can restore moved files here.</p></div></div>
+        </section>
+        <section class="panel mt-4">
+            <div class="p-4 border-bottom"><small class="muted">ENDPOINT QUARANTINE</small><h2 class="h4 mt-1 mb-0">Files quarantined on Windows devices</h2></div>
+            <p class="px-4 pt-3 muted small mb-0">Files stay on their original computer in <code>%LOCALAPPDATA%\RansomShield\quarantine</code>. The server stores the action result and checksum, not file contents. Keep the agent running to restore.</p>
+            <div class="px-4 pb-3" x-show="endpointQuarantine.length">
+                <template x-for="item in endpointQuarantine" :key="item.command_id">
+                    <article class="feed-row"><span class="feed-icon"><i class="bi bi-lock"></i></span><div><strong class="d-block" x-text="item.payload?.path || 'Endpoint file'"></strong><p class="muted small mb-1"><span x-text="item.device_label"></span> · <span x-text="item.result?.size_bytes || 0"></span> bytes · SHA-256 <code x-text="item.result?.sha256?.slice(0,16) || 'pending'"></code></p><span class="muted small" x-text="item.restored ? 'Restored' : item.status === 'completed' ? 'Quarantined on device' : item.status === 'failed' ? 'Failed: ' + (item.result?.message || 'check the device agent') : item.status === 'expired' ? 'Request expired; review the alert and request again' : 'Waiting for device check-in'"></span></div><button class="btn-outline-custom py-2 px-3" type="button" @click="restoreEndpointItem(item)" :disabled="busy || item.restored || item.status !== 'completed' || endpointDevice(item.device_id)?.status !== 'online'" x-text="item.restored ? 'Restored' : 'Restore on device'"></button></article>
+                </template>
+            </div>
+            <p class="empty-state muted small" x-show="!endpointQuarantine.length">No endpoint files have been quarantined.</p>
         </section>
         </section>
     </div>
@@ -373,6 +424,9 @@
             eventCount: 0,
             alertCount: 0,
             events: [],
+            devices: [],
+            endpointQuarantine: [],
+            activityFilters: {device: '', source: '', action: ''},
             alerts: [],
             alertFilter: 'open',
             severityFilter: '',
@@ -393,6 +447,8 @@
             folderFileCount: 0,
             folderSnapshot: new Map(),
             folderId: '',
+            folderQuarantineRecords: [],
+            browserQuarantineDirectory: 'RansomShield Quarantine',
             status: {
                 running: false,
                 connection_state: 'Loading',
@@ -416,6 +472,8 @@
                 auto_quarantine: false
             },
             policyDirty: false,
+            policySimulation: null,
+            policySimulationError: '',
             init() {
                 this.refreshAll();
                 this.refreshTimer = window.setInterval(() => this.refreshAll(false), 3000);
@@ -468,14 +526,15 @@
             async refreshAll(showBusy = true) {
                 if (showBusy) this.busy = true;
                 try {
-                    const [summary, eventData, runData, quarantineData, silradData, auditData, notificationData] = await Promise.all([
+                    const [summary, eventData, runData, quarantineData, silradData, auditData, notificationData, deviceData] = await Promise.all([
                         this.fetchJson('{{ url_for("api.monitor_status") }}'),
-                        this.fetchJson('{{ url_for("api.list_events", limit=12) }}'),
+                        this.fetchJson(this.activityQuery()),
                         this.fetchJson('/api/runs'),
                         this.fetchJson('/api/quarantine'),
                         this.fetchJson('/api/silrad/status'),
                         this.fetchJson('/api/audit?limit=30'),
-                        this.fetchJson('/api/notifications')
+                        this.fetchJson('/api/notifications'),
+                        this.fetchJson('/api/devices')
                     ]);
                     const alertData = await this.fetchJson(this.alertQuery());
                     this.status = summary.status;
@@ -486,6 +545,8 @@
                     this.alerts = alertData.alerts;
                     this.runs = runData.runs;
                     this.quarantine = quarantineData.items;
+                    this.devices = deviceData.devices;
+                    this.endpointQuarantine = deviceData.quarantine;
                     this.silrad = silradData;
                     this.auditEntries = auditData.entries;
                     this.notificationStatus = notificationData;
@@ -525,15 +586,16 @@
                 }
                 this.folderBusy = true;
                 try {
-                    const handle = await window.showDirectoryPicker({mode: 'read'});
-                    const permission = await handle.queryPermission({mode: 'read'});
-                    if (permission !== 'granted' && await handle.requestPermission({mode: 'read'}) !== 'granted') {
-                        throw new Error('Folder read permission was not granted.');
+                    const handle = await window.showDirectoryPicker({mode: 'readwrite'});
+                    const permission = await handle.queryPermission({mode: 'readwrite'});
+                    if (permission !== 'granted' && await handle.requestPermission({mode: 'readwrite'}) !== 'granted') {
+                        throw new Error('Read/write permission was not granted. Quarantine needs permission to move and restore files.');
                     }
                     this.stopFolderWatch();
                     this.folderHandle = handle;
                     this.folderName = handle.name;
                     this.folderId = crypto.randomUUID();
+                    await this.loadBrowserQuarantineRecords(handle);
                     this.folderSnapshot = await this.scanFolder(handle);
                     this.folderFileCount = this.folderSnapshot.size;
                     this.folderWatching = true;
@@ -561,6 +623,7 @@
                 const walk = async (directory, prefix = '') => {
                     for await (const entry of directory.values()) {
                         if (files.size >= 5000) break;
+                        if (!prefix && entry.kind === 'directory' && entry.name === this.browserQuarantineDirectory) continue;
                         const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
                         if (entry.kind === 'directory') {
                             await walk(entry, relative);
@@ -574,11 +637,11 @@
                 if (files.size >= 5000) throw new Error('This folder has 5,000 or more files. Choose a smaller folder.');
                 return files;
             },
-            async checkFolder() {
-                if (!this.folderWatching || !this.folderHandle || this.folderChecking) return;
+            async checkFolder(force = false) {
+                if (!this.folderWatching || !this.folderHandle || this.folderChecking || (this.folderBusy && !force)) return;
                 this.folderChecking = true;
                 try {
-                    const permission = await this.folderHandle.queryPermission({mode: 'read'});
+                    const permission = await this.folderHandle.queryPermission({mode: 'readwrite'});
                     if (permission !== 'granted') throw new Error('Folder permission expired. Choose the folder again.');
                     const current = await this.scanFolder(this.folderHandle);
                     const changes = [];
@@ -611,6 +674,182 @@
                     this.folderChecking = false;
                 }
             },
+            async loadBrowserQuarantineRecords(root) {
+                this.folderQuarantineRecords = [];
+                let quarantineDirectory;
+                try { quarantineDirectory = await root.getDirectoryHandle(this.browserQuarantineDirectory); }
+                catch (error) { if (error.name === 'NotFoundError') return; throw error; }
+                let manifestHandle;
+                try { manifestHandle = await quarantineDirectory.getFileHandle('manifest.json'); }
+                catch (error) {
+                    if (error.name === 'NotFoundError') throw new Error(`A folder named "${this.browserQuarantineDirectory}" already exists but is not a RansomShield quarantine. Rename it before using this feature.`);
+                    throw error;
+                }
+                const manifest = JSON.parse(await (await manifestHandle.getFile()).text());
+                if (manifest.version !== 1 || !Array.isArray(manifest.records)) throw new Error('The selected folder has an invalid quarantine manifest. Files were left untouched.');
+                this.folderQuarantineRecords = manifest.records;
+                let changed = false;
+                for (const item of this.folderQuarantineRecords) {
+                    if (!['moving', 'restoring'].includes(item.status)) continue;
+                    const path = item.original_path.split('/');
+                    let sourceExists = false, payloadExists = false;
+                    try { const parent = await this.directoryForPath(root, path.slice(0, -1)); await parent.getFileHandle(path.at(-1)); sourceExists = true; }
+                    catch (error) { if (error.name !== 'NotFoundError') throw error; }
+                    try { const payloadDir = await quarantineDirectory.getDirectoryHandle(item.id); await payloadDir.getFileHandle('payload'); payloadExists = true; }
+                    catch (error) { if (error.name !== 'NotFoundError') throw error; }
+                    if (!sourceExists && payloadExists) item.status = 'quarantined';
+                    else if (sourceExists && payloadExists) item.status = 'needs_review';
+                    else if (sourceExists && !payloadExists && item.status === 'restoring') {
+                        item.status = 'restored';
+                        item.restored_at = new Date().toISOString();
+                    } else item.status = 'missing';
+                    changed = true;
+                }
+                if (changed) await this.saveBrowserQuarantineRecords();
+            },
+            async saveBrowserQuarantineRecords() {
+                const directory = await this.folderHandle.getDirectoryHandle(this.browserQuarantineDirectory, {create: true});
+                const manifestHandle = await directory.getFileHandle('manifest.json', {create: true});
+                const writable = await manifestHandle.createWritable();
+                await writable.write(JSON.stringify({version: 1, records: this.folderQuarantineRecords}, null, 2));
+                await writable.close();
+            },
+            async directoryForPath(root, parts, create = false) {
+                let directory = root;
+                for (const part of parts) directory = await directory.getDirectoryHandle(part, {create});
+                return directory;
+            },
+            async sha256File(file) {
+                const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+                return Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('');
+            },
+            async pauseFolderPolling() {
+                if (this.folderTimer) window.clearInterval(this.folderTimer);
+                this.folderTimer = null;
+                while (this.folderChecking) await new Promise(resolve => window.setTimeout(resolve, 50));
+            },
+            resumeFolderPolling() {
+                if (this.folderWatching && !this.folderTimer) this.folderTimer = window.setInterval(() => this.checkFolder(), 5000);
+            },
+            async quarantineBrowserFile(alert, relativePath) {
+                if (!this.folderWatching || !this.folderHandle || !this.folderMatchesAlert(alert)) return this.showFeedback('Choose and watch the same folder that created this alert, then try again.', 'error');
+                if (!relativePath || relativePath.length > 400 || relativePath.split('/').some(part => !part || part === '.' || part === '..')) return this.showFeedback('The file path is not safe to move.', 'error');
+                const quarantineId = crypto.randomUUID();
+                const destination = `${this.folderName}\\${this.browserQuarantineDirectory}\\${quarantineId}\\payload`;
+                if (!window.confirm(`Review selected-folder quarantine.\n\nSource:\n${this.folderName}\\${relativePath.replaceAll('/', '\\')}\n\nDestination:\n${destination}\n\nThe file will be moved on this computer. Its contents will not be uploaded. Continue?`)) return;
+                this.folderBusy = true;
+                try {
+                    await this.pauseFolderPolling();
+                    if (await this.folderHandle.queryPermission({mode: 'readwrite'}) !== 'granted'
+                        && await this.folderHandle.requestPermission({mode: 'readwrite'}) !== 'granted') throw new Error('Read/write permission was not granted.');
+                    const parts = relativePath.split('/');
+                    const parent = await this.directoryForPath(this.folderHandle, parts.slice(0, -1));
+                    const sourceHandle = await parent.getFileHandle(parts.at(-1));
+                    const sourceFile = await sourceHandle.getFile();
+                    if (sourceFile.size > 100 * 1024 * 1024) throw new Error('Browser quarantine is limited to files up to 100 MB so the file can be hash-checked safely. Use the Windows endpoint agent for larger files.');
+                    if (parts[0] === this.browserQuarantineDirectory) throw new Error('Files already in quarantine cannot be quarantined again.');
+                    const sourceHash = await this.sha256File(sourceFile);
+                    const quarantineRoot = await this.folderHandle.getDirectoryHandle(this.browserQuarantineDirectory, {create: true});
+                    let manifestHandle;
+                    try { manifestHandle = await quarantineRoot.getFileHandle('manifest.json'); }
+                    catch (error) {
+                        if (error.name !== 'NotFoundError') throw error;
+                        manifestHandle = await quarantineRoot.getFileHandle('manifest.json', {create: true});
+                        const initial = await manifestHandle.createWritable();
+                        await initial.write(JSON.stringify({version: 1, records: []}));
+                        await initial.close();
+                    }
+                    const itemDirectory = await quarantineRoot.getDirectoryHandle(quarantineId, {create: true});
+                    const payload = await itemDirectory.getFileHandle('payload', {create: true});
+                    const copy = await payload.createWritable();
+                    await copy.write(sourceFile);
+                    await copy.close();
+                    const copiedFile = await payload.getFile();
+                    if (copiedFile.size !== sourceFile.size || await this.sha256File(copiedFile) !== sourceHash) {
+                        await itemDirectory.removeEntry('payload');
+                        await quarantineRoot.removeEntry(quarantineId);
+                        throw new Error('The quarantine copy did not match the original. The original file was left in place.');
+                    }
+                    const sourceCheck = await sourceHandle.getFile();
+                    if (sourceCheck.size !== sourceFile.size || await this.sha256File(sourceCheck) !== sourceHash) {
+                        await itemDirectory.removeEntry('payload');
+                        await quarantineRoot.removeEntry(quarantineId);
+                        throw new Error('The original file changed during quarantine. It was left in place; retry after edits finish.');
+                    }
+                    const item = {id: quarantineId, alert_id: alert.id, original_path: relativePath,
+                        quarantine_path: `${quarantineId}/payload`, sha256: sourceHash, size_bytes: sourceFile.size,
+                        quarantined_at: new Date().toISOString(), restored_at: null, status: 'moving'};
+                    this.folderQuarantineRecords.push(item);
+                    await this.saveBrowserQuarantineRecords();
+                    try { await parent.removeEntry(parts.at(-1)); }
+                    catch (error) {
+                        this.folderQuarantineRecords = this.folderQuarantineRecords.filter(record => record.id !== quarantineId);
+                        await this.saveBrowserQuarantineRecords();
+                        await itemDirectory.removeEntry('payload');
+                        await quarantineRoot.removeEntry(quarantineId);
+                        throw error;
+                    }
+                    item.status = 'quarantined';
+                    await this.saveBrowserQuarantineRecords();
+                    this.folderSnapshot.delete(relativePath);
+                    this.folderMessage = `Moved ${relativePath} to ${this.browserQuarantineDirectory}. You can restore it below.`;
+                    this.folderMessageType = 'info';
+                    await this.checkFolder(true);
+                    await this.refreshAll(false);
+                } catch (error) {
+                    this.folderMessage = error.message || 'Could not quarantine the selected-folder file.';
+                    this.folderMessageType = 'error';
+                } finally { this.folderBusy = false; this.resumeFolderPolling(); }
+            },
+            async restoreBrowserFile(item) {
+                if (!this.folderHandle) return this.showFeedback('Choose the same folder again before restoring this file.', 'error');
+                const parts = item.original_path.split('/');
+                const destination = `${this.folderName}\\${item.original_path.replaceAll('/', '\\')}`;
+                if (!window.confirm(`Review restore from selected-folder quarantine.\n\nSource:\n${this.folderName}\\${this.browserQuarantineDirectory}\\${item.quarantine_path.replaceAll('/', '\\')}\n\nRestore destination:\n${destination}\n\nAn existing file will never be overwritten. Continue?`)) return;
+                this.folderBusy = true;
+                try {
+                    await this.pauseFolderPolling();
+                    if (await this.folderHandle.queryPermission({mode: 'readwrite'}) !== 'granted'
+                        && await this.folderHandle.requestPermission({mode: 'readwrite'}) !== 'granted') throw new Error('Read/write permission was not granted.');
+                    const parent = await this.directoryForPath(this.folderHandle, parts.slice(0, -1), true);
+                    try { await parent.getFileHandle(parts.at(-1)); throw new Error('A file already exists at the restore location. Rename or move it first; nothing was overwritten.'); }
+                    catch (error) { if (error.name !== 'NotFoundError') throw error; }
+                    const quarantineRoot = await this.folderHandle.getDirectoryHandle(this.browserQuarantineDirectory);
+                    const itemDirectory = await quarantineRoot.getDirectoryHandle(item.id);
+                    const payload = await itemDirectory.getFileHandle('payload');
+                    const sourceFile = await payload.getFile();
+                    if (sourceFile.size > 100 * 1024 * 1024) throw new Error('This quarantine file exceeds the browser restore size limit. Use the Windows endpoint agent for larger files.');
+                    if (sourceFile.size !== item.size_bytes || await this.sha256File(sourceFile) !== item.sha256) throw new Error('The quarantine file failed its hash check; restore was stopped.');
+                    const destinationHandle = await parent.getFileHandle(parts.at(-1), {create: true});
+                    const writable = await destinationHandle.createWritable();
+                    await writable.write(sourceFile);
+                    await writable.close();
+                    const restored = await destinationHandle.getFile();
+                    if (restored.size !== item.size_bytes || await this.sha256File(restored) !== item.sha256) {
+                        await parent.removeEntry(parts.at(-1));
+                        throw new Error('The restored copy did not match the quarantined file. The quarantine copy was retained.');
+                    }
+                    const payloadCheck = await payload.getFile();
+                    if (payloadCheck.size !== item.size_bytes || await this.sha256File(payloadCheck) !== item.sha256) {
+                        await parent.removeEntry(parts.at(-1));
+                        throw new Error('The quarantine file changed during restore. The restore copy was removed and the source was retained.');
+                    }
+                    item.status = 'restoring';
+                    await this.saveBrowserQuarantineRecords();
+                    await itemDirectory.removeEntry('payload');
+                    await quarantineRoot.removeEntry(item.id);
+                    item.status = 'restored';
+                    item.restored_at = new Date().toISOString();
+                    await this.saveBrowserQuarantineRecords();
+                    this.folderSnapshot.set(item.original_path, `${restored.size}:${restored.lastModified}`);
+                    this.folderMessage = `Restored ${item.original_path}.`;
+                    this.folderMessageType = 'info';
+                    await this.checkFolder(true);
+                } catch (error) {
+                    this.folderMessage = error.message || 'Could not restore the selected-folder file.';
+                    this.folderMessageType = 'error';
+                } finally { this.folderBusy = false; this.resumeFolderPolling(); }
+            },
             metric(value) { return value == null ? 'undefined' : (value * 100).toFixed(2) + '%'; },
             stopMonitor() { return this.performAction('{{ url_for("api.stop_monitor") }}'); },
             async saveMonitorPolicy() {
@@ -623,6 +862,38 @@
                     this.policyDirty = false;
                     this.monitorPolicy = {...result.policy};
                 }
+            },
+            async simulatePolicy() {
+                this.policySimulationError = '';
+                try {
+                    this.policySimulation = await this.fetchJson('/api/monitor/policy/simulate', {
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(this.monitorPolicy)
+                    });
+                    this.showFeedback(`Replay complete: ${this.policySimulation.would_alert_count} alert window(s) from recent saved activity.`, 'info');
+                } catch (error) { this.policySimulationError = error.message; }
+            },
+            activityQuery() {
+                const params = new URLSearchParams({limit: '50'});
+                for (const key of ['device', 'source', 'action']) if (this.activityFilters[key]) params.set(key, this.activityFilters[key]);
+                return `/api/events?${params.toString()}`;
+            },
+            activityExportUrl() { return `/api/events/export.csv?${this.activityQuery().split('?')[1]}`; },
+            async loadEvents() {
+                try { this.events = (await this.fetchJson(this.activityQuery())).events; }
+                catch (error) { this.showFeedback(error.message, 'error'); }
+            },
+            async loadDevices() {
+                try {
+                    const data = await this.fetchJson('/api/devices');
+                    this.devices = data.devices;
+                    this.endpointQuarantine = data.quarantine;
+                } catch (error) { this.showFeedback(error.message, 'error'); }
+            },
+            endpointDevice(deviceId) { return this.devices.find(device => device.device_id === deviceId); },
+            endpointForAlert(alert) {
+                const match = (alert.details || '').match(/^Agent ([A-Za-z0-9._-]{1,64}) reported/);
+                return match ? this.devices.find(device => device.label === match[1]) : null;
             },
             prepareSilrad() { return this.performAction('/api/silrad/prepare'); },
             async acknowledgeAlert(alertId) {
@@ -666,24 +937,66 @@
                 }
             },
             async restoreItem(itemId) {
+                const item = this.quarantine.find(entry => entry.id === itemId);
+                if (item && !window.confirm(`Review restore before moving the file.\n\nSource in quarantine:\n${item.quarantine_path}\n\nRestore destination:\n${this.status.target}\\${item.original_path.replaceAll('/', '\\')}\n\nExisting files will not be overwritten. Continue?`)) return;
                 const result = await this.performAction(`/api/quarantine/${itemId}/restore`);
                 if (result && result.ok) await this.loadQuarantine();
             },
             isServerFolderAlert(alert) {
                 return alert.model_version === 'rolling-file-burst-v1';
             },
+            isBrowserFolderAlert(alert) { return alert.model_version === 'browser-folder-burst-v1'; },
+            folderMatchesAlert(alert) {
+                const selected = (alert.rule_trace || []).find(item => item.signal === 'selected_folder_id');
+                return Boolean(this.folderWatching && selected?.value && selected.value === this.folderId);
+            },
+            isBrowserQuarantined(alert, path) {
+                return this.folderMatchesAlert(alert) && this.folderQuarantineRecords.some(item =>
+                    item.status === 'quarantined' && Number(item.alert_id) === Number(alert.id)
+                    && item.original_path === path);
+            },
+            isEndpointAlert(alert) { return alert.model_version === 'endpoint-agent-burst-v1'; },
+            endpointQuarantineFor(alert, path) {
+                const device = this.endpointForAlert(alert);
+                return device ? this.endpointQuarantine.find(item => item.device_id === device.device_id
+                    && Number(item.payload?.alert_id) === Number(alert.id) && item.payload?.path === path) : null;
+            },
+            isEndpointQuarantined(alert, path) {
+                const item = this.endpointQuarantineFor(alert, path);
+                return Boolean(item && !item.restored && (item.status === 'pending' || item.status === 'completed'));
+            },
+            isEndpointRestored(alert, path) { return Boolean(this.endpointQuarantineFor(alert, path)?.restored); },
             isQuarantined(alert, path) {
                 const normalize = value => String(value || '').replaceAll('\\', '/');
                 return (alert.response?.files || []).some(file =>
                     file.status === 'quarantined' && normalize(file.source) === normalize(path));
             },
             async quarantineAlertFile(alertId, path) {
-                if (!window.confirm(`Move "${path}" from the server folder to quarantine? You can restore it later.`)) return;
+                const source = `${this.status.target}\\${path.replaceAll('/', '\\')}`;
+                const destination = `${this.status.quarantine_location || 'configured quarantine folder'}\\${alertId}\\${path.replaceAll('/', '\\')}`;
+                if (!window.confirm(`Review before moving this file.\n\nSource:\n${source}\n\nDestination:\n${destination}\n\nThe file leaves the watched folder. Continue?`)) return;
                 await this.performAction(`/api/alerts/${alertId}/quarantine`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({path})
                 });
+            },
+            async quarantineEndpointFile(alert, path) {
+                const device = this.endpointForAlert(alert);
+                if (!device || device.status !== 'online') return this.showFeedback('Start the Windows agent before requesting remote quarantine.', 'error');
+                const destination = `%LOCALAPPDATA%\\RansomShield\\quarantine\\${device.device_id}\\<command-id>\\${path.replaceAll('/', '\\')}`;
+                if (!window.confirm(`Review remote quarantine request.\n\nDevice: ${device.label}\nSource on device: ${device.folder_name}\\${path.replaceAll('/', '\\')}\nDestination on device: ${destination}\n\nThe file stays on that computer. Continue?`)) return;
+                await this.performAction(`/api/agents/${device.device_id}/quarantine/${alert.id}`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path})
+                });
+            },
+            async restoreEndpointItem(item) {
+                const device = this.endpointDevice(item.device_id);
+                if (!device || device.status !== 'online') return this.showFeedback('Start the Windows agent before requesting restore.', 'error');
+                const source = `%LOCALAPPDATA%\\RansomShield\\quarantine\\${device.device_id}\\${item.result?.quarantine_key || '<quarantine-key>'}`;
+                const destination = `${device.folder_name}\\${String(item.payload?.path || '').replaceAll('/', '\\')}`;
+                if (!window.confirm(`Review restore before moving the file.\n\nDevice: ${device.label}\nSource in quarantine:\n${source}\n\nRestore destination:\n${destination}\n\nExisting files will never be overwritten. Continue?`)) return;
+                await this.performAction(`/api/devices/${device.device_id}/quarantine/${item.command_id}/restore`);
             },
             showFeedback(message, type = 'info') {
                 this.feedback = message;

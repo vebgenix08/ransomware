@@ -149,7 +149,8 @@ def evaluate_test(test_csv, model_dir, predictions_csv=None):
     ratio = lambda numerator, denominator: numerator / denominator if denominator else None
     scores = {"accuracy": ratio(tp + tn, len(labels)), "precision": ratio(tp, tp + fp),
               "recall": ratio(tp, tp + fn), "f1": ratio(2 * tp, 2 * tp + fp + fn),
-              "false_positive_rate": ratio(fp, fp + tn)}
+              "false_positive_rate": ratio(fp, fp + tn),
+              "false_negative_rate": ratio(fn, fn + tp)}
     if predictions_csv:
         with Path(predictions_csv).open("w", encoding="utf-8", newline="") as stream:
             writer = csv.writer(stream)

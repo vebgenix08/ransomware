@@ -67,6 +67,60 @@ class MonitoringEvent(db.Model):
         }
 
 
+class AgentDevice(db.Model):
+    """A Windows endpoint agent enrolled to one RansomShield account."""
+
+    __tablename__ = "agent_devices"
+
+    device_id = db.Column(db.String(36), primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    label = db.Column(db.String(64), nullable=False)
+    folder_name = db.Column(db.String(255), nullable=False, default="")
+    agent_version = db.Column(db.String(30), nullable=False, default="")
+    first_seen_at = db.Column(db.DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    last_seen_at = db.Column(db.DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
+    last_event_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "device_id": self.device_id,
+            "label": self.label,
+            "folder_name": self.folder_name,
+            "agent_version": self.agent_version,
+            "first_seen_at": utc_isoformat(self.first_seen_at),
+            "last_seen_at": utc_isoformat(self.last_seen_at),
+            "last_event_at": utc_isoformat(self.last_event_at) if self.last_event_at else None,
+        }
+
+
+class AgentCommand(db.Model):
+    """Audited request/response for an explicit endpoint action."""
+
+    __tablename__ = "agent_commands"
+
+    command_id = db.Column(db.String(36), primary_key=True)
+    device_id = db.Column(db.String(36), db.ForeignKey("agent_devices.device_id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    action = db.Column(db.String(20), nullable=False)
+    payload = db.Column(db.JSON, nullable=False, default=dict)
+    status = db.Column(db.String(20), nullable=False, default="pending", index=True)
+    result = db.Column(db.JSON, nullable=False, default=dict)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
+    completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "command_id": self.command_id,
+            "device_id": self.device_id,
+            "action": self.action,
+            "payload": self.payload or {},
+            "status": self.status,
+            "result": self.result or {},
+            "created_at": utc_isoformat(self.created_at),
+            "completed_at": utc_isoformat(self.completed_at) if self.completed_at else None,
+        }
+
+
 class Alert(db.Model):
     __tablename__ = "alerts"
 

@@ -28,6 +28,7 @@ Open <http://127.0.0.1:5000>, create an account, and sign in. Keep the terminal 
 
 - **Firebase Authentication:** follow [docs/FIREBASE_SETUP_WALKTHROUGH.md](docs/FIREBASE_SETUP_WALKTHROUGH.md). Keep `AUTH_PROVIDER=local` until the Firebase web settings and private Admin credentials are configured. Never commit or share the service-account JSON.
 - **Email alerts:** add your provider settings to `.env`. For Gmail, use a Google App Password, not your usual Gmail password. See [docs/INTEGRATIONS_SETUP.md](docs/INTEGRATIONS_SETUP.md). Restart the app after changes. An alert must be created, and email notifications must be enabled for the account, before an email is sent.
+- **Monitor a second Windows computer:** configure `AGENT_API_TOKEN` and `AGENT_OWNER_EMAIL` on the app server, then follow [the Windows endpoint-agent guide](docs/WINDOWS_ENDPOINT_AGENT.md). The agent reports file activity and device check-ins; confirmed manual quarantine and restore requests run on the endpoint while its agent is online.
 
 ## Documentation
 

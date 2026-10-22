@@ -95,6 +95,7 @@ def _rates(labels: list[int], probabilities: list[float], threshold: float) -> d
             "f1": f1,
             "f2": f2,
             "false_positive_rate": ratio(fp, fp + tn),
+            "false_negative_rate": ratio(fn, fn + tp),
         },
     }
 

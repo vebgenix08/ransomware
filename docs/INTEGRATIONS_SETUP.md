@@ -9,7 +9,7 @@ RansomShield is a Python Flask application. It uses SQLite locally unless `DATAB
 3. Fill only the settings for services you are using. Leave `AUTH_PROVIDER=local` unless Firebase sign-in has been configured; see [FIREBASE_SETUP_WALKTHROUGH.md](FIREBASE_SETUP_WALKTHROUGH.md).
 4. Restart the Flask app and any separately running receiver or agent after changing settings.
 
-The checked-in `.env.example` is the authoritative list of supported variable names. It includes the database, SMTP, Firebase, webhook, monitor, SILRAD, and endpoint-agent settings. `.env` is local and must not be committed.
+The checked-in `.env.example` is the authoritative list of supported variable names. It includes the database, SMTP, Firebase, webhook, monitor, SILRAD, and endpoint-agent settings. `.env` is local and must not be committed. To monitor a second Windows computer, follow [Windows endpoint-agent setup](WINDOWS_ENDPOINT_AGENT.md).
 
 ## Email alerts
 

@@ -49,6 +49,18 @@ class SilradPreparation:
                     or not isinstance(confusion_matrix.get("fn"), int)
                 ):
                     raise ValueError("SILRAD held-out evaluation is incomplete.")
+                metrics = dict(metrics)
+                # Older prepared metadata omitted FNR even though its
+                # confusion matrix contains the required counts. Derive it
+                # when serving status so the UI never displays "undefined".
+                if "false_negative_rate" not in metrics:
+                    true_positives = confusion_matrix.get("tp")
+                    false_negatives = confusion_matrix.get("fn")
+                    if isinstance(true_positives, (int, float)) and isinstance(false_negatives, (int, float)):
+                        denominator = true_positives + false_negatives
+                        metrics["false_negative_rate"] = (
+                            false_negatives / denominator if denominator else None
+                        )
                 return {
                     "ready": True,
                     "state": "ready",

@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from app import create_app
@@ -43,6 +44,33 @@ class EndpointAgentApiTests(unittest.TestCase):
             event = MonitoringEvent.query.filter_by(source="agent").one()
             owner = User.query.filter_by(email="agent-owner@example.invalid").one()
             self.assertEqual(event.user_id, owner.id)
+            self.assertEqual(event.file_activity, [{"operation": "created", "path": "safe/file.txt"}])
+
+    def test_agent_health_check_requires_token_and_configured_owner(self):
+        self.assertEqual(self.client.get("/api/agent/health").status_code, 401)
+        response = self.client.get("/api/agent/health", headers={"Authorization": "Bearer test-agent-secret"})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json["ok"])
+
+    def test_agent_event_preserves_timezone_aware_observed_time(self):
+        observed = "2026-10-22T06:00:18.066636+00:00"
+        payload = {"event_id": str(uuid4()), "agent": "windows-laptop", "operation": "created",
+                   "path": "safe/file.txt", "observed_at": observed}
+        response = self.client.post("/api/agent/events", json=payload,
+                                    headers={"Authorization": "Bearer test-agent-secret"})
+        self.assertEqual(response.status_code, 202)
+        with self.app.app_context():
+            event = MonitoringEvent.query.filter_by(source="agent").one()
+            self.assertEqual(event.created_at.replace(tzinfo=timezone.utc),
+                             datetime.fromisoformat(observed))
+
+    def test_agent_rejects_timezone_naive_or_future_observed_time(self):
+        headers = {"Authorization": "Bearer test-agent-secret"}
+        for timestamp in ("2026-10-22T06:00:18", "2999-01-01T00:00:00+00:00"):
+            payload = {"event_id": str(uuid4()), "agent": "windows-laptop", "operation": "created",
+                       "path": "safe/file.txt", "observed_at": timestamp}
+            response = self.client.post("/api/agent/events", json=payload, headers=headers)
+            self.assertEqual(response.status_code, 400)
 
     def test_rejects_traversal_and_invalid_operation(self):
         headers = {"Authorization": "Bearer test-agent-secret"}
