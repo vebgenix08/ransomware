@@ -1,4 +1,4 @@
-# RansomShield
+# RansomShield User Guide
 
 RansomShield is a local Flask research prototype for directory activity monitoring and labeled CSV evaluation. Live monitoring uses explicit rolling file-change burst rules; it reports an activity anomaly, not a ransomware verdict. The temporal TCN + XGBoost detector was trained on synthetic sequences and is used only for offline telemetry CSV evaluation. Neither path is production endpoint protection.
 
@@ -121,20 +121,23 @@ To check Gmail delivery manually, run the RansomShield Online Benchmark from the
 
 - `app/` Flask routes, models, dashboard, detector, PWA assets, and response logic
 - `app/artifacts/` frozen model artifacts
-- `data/mlran/` published MLRan data and provenance notes
+- `data/mlran/` published MLRan data and dataset metadata
 - `instance/` local database, monitor target, SILRAD files/model, received data, quarantine, and run reports; ignored by Git
 - `scripts/` training, evaluation, and SFTP sender/receiver utilities
 - `tests/` isolated automated tests
 
 ## Documentation
 
-- This README: install, run, use, configure email, and understand current limits.
+- This guide: dashboard use, setup details, and current limits.
 - [INTEGRATIONS_SETUP.md](INTEGRATIONS_SETUP.md): per-installation environment settings and hosting notes.
 - [FIREBASE_SETUP_WALKTHROUGH.md](FIREBASE_SETUP_WALKTHROUGH.md): Firebase Authentication setup.
 - [TWO_LAPTOP_SETUP.md](TWO_LAPTOP_SETUP.md): transfer a dataset between Windows devices.
-- [data/README.md](data/README.md) and [data/mlran/README.md](data/mlran/README.md): dataset scope, sources, and limitations.
 
 The project presentation and research paper are retained as academic deliverables. Their historical methodology and results may not describe the current implementation; use this README for current application behavior.
+
+## Optional project tools
+
+The Windows endpoint agent has its own small dependency file at `scripts/requirements-agent.txt` so a second computer does not need the full server stack. The presentation generator uses `requirements-presentation.txt`; neither optional file is needed for normal app setup.
 
 ## Known limits
 

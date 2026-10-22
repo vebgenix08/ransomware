@@ -95,7 +95,7 @@ directly when a second device is available.
 Open PowerShell in the extracted folder:
 
 ```powershell
-python send_dataset.py heldout.csv --to WINDOWS_USER@LAPTOP2_IP --inbox "LAPTOP2_INSTANCE_INBOX_PATH" --dataset-name "MLRan held-out samples" --source "Published MLRan dataset; see project notes in docs/data/mlran/README.md"
+python send_dataset.py heldout.csv --to WINDOWS_USER@LAPTOP2_IP --inbox "LAPTOP2_INSTANCE_INBOX_PATH" --dataset-name "MLRan held-out samples" --source "Published MLRan held-out dataset in data/mlran/heldout.csv"
 ```
 
 Replace the Windows username, Wi-Fi IP and inbox path with Laptop 2's values.

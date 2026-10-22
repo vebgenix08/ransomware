@@ -32,4 +32,6 @@ Open <http://127.0.0.1:5000>, create an account, and sign in. Keep the terminal 
 
 ## Documentation
 
-The [full user and setup guide](docs/README.md) explains dashboard workflows, folder monitoring, the SILRAD benchmark, email behavior, testing, and known limitations. Firestore, Firebase Storage, and Firebase Hosting are not needed for the current application.
+The [RansomShield User Guide](docs/USER_GUIDE.md) explains dashboard workflows, folder monitoring, the SILRAD benchmark, email behavior, testing, and known limitations. Firestore, Firebase Storage, and Firebase Hosting are not needed for the current application.
+
+Use `requirements.txt` for the app. The smaller `scripts/requirements-agent.txt` is for a separate Windows agent computer; `requirements-presentation.txt` is only for regenerating the presentation with `scripts/generate_project_ppt.py`. Neither optional file is needed to run the app.

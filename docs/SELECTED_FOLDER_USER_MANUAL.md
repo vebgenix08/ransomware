@@ -79,4 +79,4 @@ Keep the `RansomShield Quarantine` folder and its `manifest.json` file. They are
 - The browser sends file paths and basic change details to RansomShield, but not the file contents.
 - This is a project prototype. Do not rely on it as your only backup or security tool.
 
-For the app server folder and Windows endpoint agent, see [the main project guide](README.md) and [the endpoint-agent guide](WINDOWS_ENDPOINT_AGENT.md).
+For the app server folder and Windows endpoint agent, see [the main project guide](../README.md) and [the endpoint-agent guide](WINDOWS_ENDPOINT_AGENT.md).
