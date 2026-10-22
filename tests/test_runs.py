@@ -152,6 +152,9 @@ class RunTests(unittest.TestCase):
             def status(self):
                 return {"running": True, "connection_state": "Connected", "model_state": "Rolling burst rules",
                         "target": "private/server/path", "interval_seconds": 2, "reconcile_seconds": 30,
+                        "policy": {"window_seconds": 30, "delete_threshold": 10, "modify_threshold": 20,
+                                   "mixed_threshold": 30, "mixed_destructive_minimum": 10,
+                                   "auto_quarantine": False},
                         "auto_quarantine": False, "cpu_percent": 17, "memory_percent": 20,
                         "process_count": 4, "last_check": None, "last_successful_scan": None,
                         "last_risk_score": 60, "monitored_files": 9, "dropped_events": 0,
@@ -329,6 +332,9 @@ class RunTests(unittest.TestCase):
         self.assertEqual(self.client.post('/api/monitor/start').status_code, 400)
 
     def test_live_monitor_status_explains_real_file_burst_policy(self):
+        monitor = self.app.extensions['monitoring_service']
+        monitor.policy['auto_quarantine'] = False
+        self.app.config['AUTO_QUARANTINE'] = False
         response = self.client.get('/api/monitor/status')
         self.assertEqual(response.status_code, 200)
         policy = response.json['live_policy']
@@ -337,6 +343,46 @@ class RunTests(unittest.TestCase):
         self.assertEqual(policy['alert_thresholds']['modified_files'], 20)
         self.assertFalse(policy['automatic_quarantine'])
         self.assertIn('not a probability', policy['score_type'])
+
+    def test_monitor_policy_can_be_saved_and_is_returned_by_status(self):
+        monitor = self.app.extensions['monitoring_service']
+        monitor.policy_path = self.root / 'monitor-policy.json'
+        policy = {
+            'window_seconds': 45,
+            'delete_threshold': 7,
+            'modify_threshold': 11,
+            'mixed_threshold': 18,
+            'mixed_destructive_minimum': 5,
+            'auto_quarantine': True,
+        }
+        response = self.client.post('/api/monitor/policy', json=policy)
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertTrue(monitor.policy_path.exists())
+        status = self.client.get('/api/monitor/status').json
+        self.assertEqual(status['live_policy']['window_seconds'], 45)
+        self.assertEqual(status['live_policy']['alert_thresholds']['modified_files'], 11)
+        self.assertTrue(status['live_policy']['automatic_quarantine'])
+        self.assertTrue(self.app.config['AUTO_QUARANTINE'])
+
+    def test_monitor_policy_rejects_bad_limits_and_changes_while_running(self):
+        invalid = self.client.post('/api/monitor/policy', json={
+            'window_seconds': 301,
+            'delete_threshold': 10,
+            'modify_threshold': 20,
+            'mixed_threshold': 30,
+            'mixed_destructive_minimum': 10,
+            'auto_quarantine': False,
+        })
+        self.assertEqual(invalid.status_code, 422)
+        monitor = self.app.extensions['monitoring_service']
+        self.assertTrue(monitor.start(owner_id=self.user.id))
+        try:
+            blocked = self.client.post('/api/monitor/policy', json={
+                **monitor.policy, 'window_seconds': 40,
+            })
+            self.assertEqual(blocked.status_code, 409)
+        finally:
+            monitor.stop(owner_id=self.user.id)
 
     def test_browser_folder_events_are_authenticated_scoped_deduplicated_and_alerted(self):
         folder_id = str(uuid4())
@@ -350,20 +396,36 @@ class RunTests(unittest.TestCase):
         alert = Alert.query.filter_by(model_version='browser-folder-burst-v1', user_id=self.user.id).one()
         self.assertIn('20 distinct file changes', alert.details)
         self.assertTrue(alert.responses[0].completed)
-
         duplicate = self.client.post('/api/browser-folder/events', json={"folder_id": folder_id, "events": events})
         self.assertEqual(duplicate.status_code, 202)
         self.assertEqual(duplicate.json['accepted'], 0)
-        self.assertEqual(MonitoringEvent.query.filter_by(source='browser', user_id=self.user.id).count(), 20)
-
         invalid = self.client.post('/api/browser-folder/events', json={"folder_id": folder_id, "events": [
             {"event_id": str(uuid4()), "operation": "created", "path": "../outside.txt"}
         ]})
         self.assertEqual(invalid.status_code, 400)
-
         g.pop('_login_user', None)
         anonymous = self.app.test_client().post('/api/browser-folder/events', json={"folder_id": folder_id, "events": events[:1]})
         self.assertEqual(anonymous.status_code, 302)
+
+    def test_browser_folder_uses_custom_saved_live_thresholds(self):
+        monitor = self.app.extensions['monitoring_service']
+        monitor.update_policy({
+            'window_seconds': 22,
+            'delete_threshold': 9,
+            'modify_threshold': 2,
+            'mixed_threshold': 8,
+            'mixed_destructive_minimum': 3,
+            'auto_quarantine': False,
+        })
+        folder_id = str(uuid4())
+        events = [{"event_id": str(uuid4()), "operation": "modified", "path": f"safe/custom-{i}.txt"}
+                  for i in range(2)]
+        response = self.client.post('/api/browser-folder/events', json={"folder_id": folder_id, "events": events})
+        self.assertEqual(response.status_code, 202, response.json)
+        self.assertTrue(response.json['alert_created'])
+        alert = Alert.query.filter_by(model_version='browser-folder-burst-v1', user_id=self.user.id).one()
+        self.assertIn('in 22 seconds', alert.details)
+        self.assertEqual(MonitoringEvent.query.filter_by(source='browser', user_id=self.user.id).count(), 2)
 
     def test_included_mlran_runs_and_exports_real_published_predictions(self):
         response = self.client.post('/api/runs/mlran')

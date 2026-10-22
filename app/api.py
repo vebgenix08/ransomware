@@ -132,7 +132,9 @@ def browser_folder_events():
 def evaluate_browser_folder_window(folder_id: str, folder_name: str, user_id: int) -> bool:
     """Apply the published rolling burst rules to one authenticated browser folder."""
     now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(seconds=30)
+    policy = current_app.extensions["monitoring_service"].policy
+    window_seconds = policy["window_seconds"]
+    cutoff = now - timedelta(seconds=window_seconds)
     prefix = f"Browser folder {folder_id} ({folder_name}): "
     events = MonitoringEvent.query.filter(
         MonitoringEvent.source == "browser",
@@ -149,16 +151,24 @@ def evaluate_browser_folder_window(folder_id: str, folder_name: str, user_id: in
     created, modified, deleted = (paths[key] for key in ("created", "modified", "deleted"))
     total = len(created | modified | deleted)
     destructive = len(modified | deleted)
-    if not (len(deleted) >= 10 or len(modified) >= 20 or (total >= 30 and destructive >= 10)):
+    if not (len(deleted) >= policy["delete_threshold"]
+            or len(modified) >= policy["modify_threshold"]
+            or (total >= policy["mixed_threshold"]
+                and destructive >= policy["mixed_destructive_minimum"])):
         return False
     if Alert.query.filter_by(user_id=user_id, model_version="browser-folder-burst-v1").filter(
             Alert.created_at >= now - timedelta(seconds=60)).first():
         return False
-    risk = min(100, round(100 * max(len(deleted) / 10, len(modified) / 20, total / 30)))
-    severe = len(deleted) >= 20 or len(modified) >= 40 or (total >= 60 and destructive >= 20)
+    risk = min(100, round(100 * max(len(deleted) / policy["delete_threshold"],
+                                   len(modified) / policy["modify_threshold"],
+                                   total / policy["mixed_threshold"])))
+    severe = (len(deleted) >= 2 * policy["delete_threshold"]
+              or len(modified) >= 2 * policy["modify_threshold"]
+              or (total >= 2 * policy["mixed_threshold"]
+                  and destructive >= 2 * policy["mixed_destructive_minimum"]))
     current_app.extensions["monitoring_service"]._persist_alert(
         "Browser folder file-change burst",
-        (f"Browser folder {folder_name} reported {total} distinct file changes in 30 seconds "
+        (f"Browser folder {folder_name} reported {total} distinct file changes in {window_seconds} seconds "
          f"({len(created)} created, {len(modified)} modified, {len(deleted)} deleted). "
          "Review this activity; this rule is an anomaly signal, not a malware verdict."),
         "high" if severe else "medium", max(risk, 60), created | modified | deleted,
@@ -175,7 +185,9 @@ def evaluate_browser_folder_window(folder_id: str, folder_name: str, user_id: in
 def evaluate_agent_window(agent: str, user_id: int) -> bool:
     """Evaluate persisted agent events so separate cloud instances share state."""
     now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(seconds=30)
+    policy = current_app.extensions["monitoring_service"].policy
+    window_seconds = policy["window_seconds"]
+    cutoff = now - timedelta(seconds=window_seconds)
     agent_prefix = f"Agent {agent}: "
     events = (MonitoringEvent.query.filter(
         MonitoringEvent.source == "agent",
@@ -194,8 +206,10 @@ def evaluate_agent_window(agent: str, user_id: int) -> bool:
     created, modified, deleted = (paths[key] for key in ("created", "modified", "deleted"))
     total = len(created | modified | deleted)
     destructive = len(modified | deleted)
-    burst = (len(deleted) >= 10 or len(modified) >= 20
-             or (total >= 30 and destructive >= 10))
+    burst = (len(deleted) >= policy["delete_threshold"]
+             or len(modified) >= policy["modify_threshold"]
+             or (total >= policy["mixed_threshold"]
+                 and destructive >= policy["mixed_destructive_minimum"]))
     if not burst:
         return False
     last_alert = Alert.query.filter_by(user_id=user_id, model_version="endpoint-agent-burst-v1").filter(
@@ -203,13 +217,17 @@ def evaluate_agent_window(agent: str, user_id: int) -> bool:
     ).first()
     if last_alert:
         return False
-    risk = min(100, round(100 * max(len(deleted) / 10, len(modified) / 20, total / 30)))
-    severe = (len(deleted) >= 20 or len(modified) >= 40
-              or (total >= 60 and destructive >= 20))
+    risk = min(100, round(100 * max(len(deleted) / policy["delete_threshold"],
+                                   len(modified) / policy["modify_threshold"],
+                                   total / policy["mixed_threshold"])))
+    severe = (len(deleted) >= 2 * policy["delete_threshold"]
+              or len(modified) >= 2 * policy["modify_threshold"]
+              or (total >= 2 * policy["mixed_threshold"]
+                  and destructive >= 2 * policy["mixed_destructive_minimum"]))
     monitor = current_app.extensions["monitoring_service"]
     monitor._persist_alert(
         "Remote endpoint file-change burst",
-        (f"Agent {agent} reported {total} distinct file changes in 30 seconds "
+        (f"Agent {agent} reported {total} distinct file changes in {window_seconds} seconds "
          f"({len(created)} created, {len(modified)} modified, {len(deleted)} deleted). "
          "Review this activity; this rule is an anomaly signal, not a malware verdict."),
         "high" if severe else "medium", max(risk, 60), created | modified | deleted,
@@ -321,6 +339,7 @@ def monitor_status():
             "connection_state": "In use by another account" if monitor.is_running else "Stopped",
             "model_state": "Rolling burst rules",
             "target": "Not assigned to this account", "interval_seconds": status["interval_seconds"],
+            "policy": status["policy"],
             "reconcile_seconds": status["reconcile_seconds"], "auto_quarantine": False,
             "cpu_percent": 0, "memory_percent": 0, "process_count": 0, "last_check": None,
             "last_successful_scan": None, "last_risk_score": 0, "monitored_files": 0,
@@ -335,19 +354,37 @@ def monitor_status():
                       ("display_name", "trained_at", "training", "metrics", "decision_threshold")},
             "live_policy": {
                 "name": "Rolling file-burst rules",
-                "window_seconds": 30,
+                "window_seconds": status["policy"]["window_seconds"],
                 "alert_thresholds": {
-                    "deleted_files": 10,
-                    "modified_files": 20,
-                    "mixed_changes": 30,
-                    "mixed_change_minimum_modified_or_deleted": 10,
+                    "deleted_files": status["policy"]["delete_threshold"],
+                    "modified_files": status["policy"]["modify_threshold"],
+                    "mixed_changes": status["policy"]["mixed_threshold"],
+                    "mixed_change_minimum_modified_or_deleted": status["policy"]["mixed_destructive_minimum"],
                 },
                 "score_type": "heuristic activity score; not a probability",
-                "automatic_quarantine": False,
+                "automatic_quarantine": status["policy"]["auto_quarantine"],
             },
             "published_model": {key: public_model.get(key) for key in ("display_name", "trained_at", "training", "metrics", "limitations")},
         }
     )
+
+
+@api.post("/monitor/policy")
+@login_required
+def update_monitor_policy():
+    monitor = get_monitor()
+    if monitor.is_running and not monitor.owned_by(current_user.id):
+        return jsonify(ok=False, message="Only the account using the server monitor can change its settings."), 409
+    body = request.get_json(silent=True)
+    try:
+        policy = monitor.update_policy(body)
+    except RuntimeError as exc:
+        return jsonify(ok=False, message=str(exc)), 409
+    except (TypeError, ValueError) as exc:
+        return jsonify(ok=False, message=str(exc)), 422
+    record_audit("monitor_policy_updated", policy=policy)
+    db.session.commit()
+    return jsonify(ok=True, message="Server monitor settings saved.", policy=policy)
 
 
 @api.post("/monitor/start")

@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 from collections import deque
+import json
+import os
 from pathlib import Path
 from queue import Empty, Full, Queue
 from threading import Event, Lock, Thread
@@ -133,6 +135,15 @@ class MonitoringService:
             "collector": "poll",
             "last_activity": {},
         }
+        self.policy_path: Optional[Path] = None
+        self.policy = {
+            "window_seconds": int(ACTIVITY_WINDOW_SECONDS),
+            "delete_threshold": DELETE_ALERT_THRESHOLD,
+            "modify_threshold": MODIFY_ALERT_THRESHOLD,
+            "mixed_threshold": MIXED_ALERT_THRESHOLD,
+            "mixed_destructive_minimum": MIN_DESTRUCTIVE_CHANGES,
+            "auto_quarantine": False,
+        }
 
     def init_app(self, app) -> None:
         self.app = app
@@ -140,7 +151,69 @@ class MonitoringService:
         self.reconcile_seconds = float(app.config.get("MONITOR_RECONCILE_SECONDS", RECONCILE_SECONDS))
         self.target_path = Path(app.config.get("MONITOR_TARGET_PATH", Path(app.instance_path) / "monitor_target"))
         self.target_path.mkdir(parents=True, exist_ok=True)
+        configured_policy_path = app.config.get("MONITOR_POLICY_PATH")
+        self.policy_path = (
+            Path(configured_policy_path) if configured_policy_path
+            else (None if app.testing else Path(app.instance_path) / "monitor_policy.json")
+        )
+        self.policy["auto_quarantine"] = bool(app.config.get("AUTO_QUARANTINE", False))
+        saved_policy = None
+        if self.policy_path:
+            try:
+                saved_policy = json.loads(self.policy_path.read_text(encoding="utf-8"))
+                self.policy = self.validate_policy({**self.policy, **saved_policy})
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                pass
+        self._apply_policy_to_app(enable_real_quarantine=bool(saved_policy and self.policy["auto_quarantine"]))
         app.extensions["monitoring_service"] = self
+
+    @staticmethod
+    def validate_policy(value: dict) -> dict:
+        """Validate the user-editable server monitor policy."""
+        if not isinstance(value, dict):
+            raise ValueError("Monitoring settings must be an object.")
+
+        def bounded_int(name, minimum, maximum):
+            raw = value.get(name)
+            if isinstance(raw, bool) or not isinstance(raw, int) or not minimum <= raw <= maximum:
+                raise ValueError(f"{name.replace('_', ' ').title()} must be between {minimum} and {maximum}.")
+            return raw
+
+        policy = {
+            "window_seconds": bounded_int("window_seconds", 5, 300),
+            "delete_threshold": bounded_int("delete_threshold", 1, 5000),
+            "modify_threshold": bounded_int("modify_threshold", 1, 5000),
+            "mixed_threshold": bounded_int("mixed_threshold", 1, 5000),
+            "mixed_destructive_minimum": bounded_int("mixed_destructive_minimum", 1, 5000),
+            "auto_quarantine": value.get("auto_quarantine"),
+        }
+        if not isinstance(policy["auto_quarantine"], bool):
+            raise ValueError("Automatic quarantine must be on or off.")
+        if policy["mixed_destructive_minimum"] > policy["mixed_threshold"]:
+            raise ValueError("The mixed-change minimum cannot exceed the total-change limit.")
+        return policy
+
+    def _apply_policy_to_app(self, enable_real_quarantine: bool = False) -> None:
+        if not self.app:
+            return
+        self.app.config["AUTO_QUARANTINE"] = self.policy["auto_quarantine"]
+        # Saving the dashboard switch explicitly opts into real file moves.
+        # Environment-level AUTO_QUARANTINE can still be paired with dry-run.
+        if enable_real_quarantine:
+            self.app.config["QUARANTINE_MODE"] = "enabled"
+
+    def update_policy(self, values: dict) -> dict:
+        policy = self.validate_policy(values)
+        if self.is_running:
+            raise RuntimeError("Stop the server monitor before changing these settings.")
+        self.policy = policy
+        self._apply_policy_to_app(enable_real_quarantine=policy["auto_quarantine"])
+        if self.policy_path:
+            self.policy_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self.policy_path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
+            os.replace(temporary, self.policy_path)
+        return dict(policy)
 
     @property
     def is_running(self) -> bool:
@@ -206,6 +279,7 @@ class MonitoringService:
             "interval_seconds": self.interval_seconds,
             "reconcile_seconds": self.reconcile_seconds,
             "auto_quarantine": self.app.config["AUTO_QUARANTINE"],
+            "policy": dict(self.policy),
             **metrics,
         }
 
@@ -301,7 +375,8 @@ class MonitoringService:
         operation_rate = round(file_changes / max(self.interval_seconds, 0.1), 2)
         if file_changes:
             self._activity_window.append((now_monotonic, frozenset(created), frozenset(modified), frozenset(deleted)))
-        cutoff = now_monotonic - ACTIVITY_WINDOW_SECONDS
+        policy = dict(self.policy)
+        cutoff = now_monotonic - policy["window_seconds"]
         while self._activity_window and self._activity_window[0][0] < cutoff:
             self._activity_window.popleft()
 
@@ -314,14 +389,15 @@ class MonitoringService:
         # This explainable activity score is not a probability or a malware
         # classification. Live alerts use only the explicit burst rules below.
         risk_score = min(100, round(100 * max(
-            len(window_deleted) / DELETE_ALERT_THRESHOLD,
-            len(window_modified) / MODIFY_ALERT_THRESHOLD,
-            window_total / MIXED_ALERT_THRESHOLD,
+            len(window_deleted) / policy["delete_threshold"],
+            len(window_modified) / policy["modify_threshold"],
+            window_total / policy["mixed_threshold"],
         )))
         burst_detected = (
-            len(window_deleted) >= DELETE_ALERT_THRESHOLD
-            or len(window_modified) >= MODIFY_ALERT_THRESHOLD
-            or (window_total >= MIXED_ALERT_THRESHOLD and window_destructive >= MIN_DESTRUCTIVE_CHANGES)
+            len(window_deleted) >= policy["delete_threshold"]
+            or len(window_modified) >= policy["modify_threshold"]
+            or (window_total >= policy["mixed_threshold"]
+                and window_destructive >= policy["mixed_destructive_minimum"])
         )
         now = datetime.now(timezone.utc).isoformat()
 
@@ -367,37 +443,44 @@ class MonitoringService:
                 self._last_burst_alert_at = now_monotonic
                 burst_details = (
                     f"High-volume file-change burst across {window_total} distinct files in "
-                    f"{int(ACTIVITY_WINDOW_SECONDS)} seconds ({len(window_created)} created, "
+                    f"{policy['window_seconds']} seconds ({len(window_created)} created, "
                     f"{len(window_modified)} modified, {len(window_deleted)} deleted). "
                     "Review this activity; this rule is an anomaly signal, not a malware verdict."
                 )
                 burst_score = max(risk_score, 60)
                 severe_burst = (
-                    len(window_deleted) >= 2 * DELETE_ALERT_THRESHOLD
-                    or len(window_modified) >= 2 * MODIFY_ALERT_THRESHOLD
-                    or (window_total >= 2 * MIXED_ALERT_THRESHOLD and window_destructive >= 2 * MIN_DESTRUCTIVE_CHANGES)
+                    len(window_deleted) >= 2 * policy["delete_threshold"]
+                    or len(window_modified) >= 2 * policy["modify_threshold"]
+                    or (window_total >= 2 * policy["mixed_threshold"]
+                        and window_destructive >= 2 * policy["mixed_destructive_minimum"])
                 )
+                alert_files = [
+                    {
+                        "path": path,
+                        "operations": [
+                            operation
+                            for operation, paths in (
+                                ("created", window_created),
+                                ("modified", window_modified),
+                                ("deleted", window_deleted),
+                            )
+                            if path in paths
+                        ],
+                    }
+                    for path in sorted(window_touched)
+                ][:100]
+                quarantine_candidates = {
+                    item["path"] for item in alert_files
+                    if any(operation in {"created", "modified"} for operation in item["operations"])
+                }
                 self._persist_alert(
                     "High-volume file-change burst",
                     burst_details,
                     "high" if severe_burst else "medium",
                     burst_score,
                     window_touched,
-                    file_activity=[
-                        {
-                            "path": path,
-                            "operations": [
-                                operation
-                                for operation, paths in (
-                                    ("created", window_created),
-                                    ("modified", window_modified),
-                                    ("deleted", window_deleted),
-                                )
-                                if path in paths
-                            ],
-                        }
-                        for path in sorted(window_touched)
-                    ],
+                    file_activity=alert_files,
+                    quarantine_candidates=quarantine_candidates,
                 )
 
     def _persist_event(        self,
@@ -435,6 +518,7 @@ class MonitoringService:
         model_version: str = "rolling-file-burst-v1",
         owner_id: Optional[int] = None,
         file_activity=None,
+        quarantine_candidates=None,
     ) -> None:
         if not self.app:
             return
@@ -458,10 +542,12 @@ class MonitoringService:
             db.session.commit()
             if risk_score >= 60:
                 from .response import respond
-                # File-change volume alone is not sufficient evidence for an
-                # automatic file move. Keep the response audit-only.
-                action = respond(self.app, alert, self.target_path, affected or set(), quarantine_allowed=False)
-                # Suppress only our own removals, retaining concurrent external changes.
+                action = respond(
+                    self.app, alert, self.target_path,
+                    quarantine_candidates if quarantine_candidates is not None else (affected or set()),
+                    quarantine_allowed=model_version == "rolling-file-burst-v1",
+                )
+                # Suppress only our own moves, retaining concurrent external changes.
                 for record in action.result["files"]:
                     if record["status"] == "quarantined":
-                        self._snapshot.pop(record["source"], None)
+                        self.note_quarantined_file(record["source"])

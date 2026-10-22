@@ -296,7 +296,7 @@ def respond(app, alert, root, affected, quarantine_allowed=True):
                             size_bytes=size,
                         )
                     )
-                    record.update(status="quarantined", destination=str(target), sha256=digest)
+                    record.update(status="quarantined", destination=str(target), sha256=digest, manual=False)
             except (OSError, ValueError) as exc:
                 record.update(status="failed", error=str(exc))
             result["files"].append(record)
@@ -304,7 +304,12 @@ def respond(app, alert, root, affected, quarantine_allowed=True):
             flag_modified(action, "result")
             db.session.commit()
     else:
-        result["quarantine"] = "disabled" if not app.config["AUTO_QUARANTINE"] else "below_quarantine_threshold"
+        if not app.config["AUTO_QUARANTINE"]:
+            result["quarantine"] = "disabled"
+        elif not quarantine_allowed:
+            result["quarantine"] = "not_supported_for_source"
+        else:
+            result["quarantine"] = "below_quarantine_threshold"
     if "quarantine" not in result:
         statuses = {item["status"] for item in result["files"]}
         if "would_quarantine" in statuses:

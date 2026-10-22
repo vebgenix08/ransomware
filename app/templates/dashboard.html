@@ -108,7 +108,7 @@
                 <li>Review the action and path under <strong>Recent activity</strong>, then stop monitoring.</li>
             </ol>
         </section>
-        <p class="small muted">SILRAD is a separate offline dataset test. A live activity alert asks for review; it does not confirm ransomware. You choose whether to manually quarantine an existing file from a server-folder alert.</p>
+        <p class="small muted">SILRAD is a separate offline dataset test. A live activity alert asks for review; it does not confirm ransomware. Server-folder files can be quarantined manually from an alert or automatically when you enable that option.</p>
         </section>
 
         <section id="panel-monitor" role="tabpanel" aria-labelledby="tab-monitor" x-show="activeTab === 'monitor'" x-cloak>
@@ -149,7 +149,21 @@
                 </section>
             </div>
         </div>
-        <p class="small muted mb-3">Alert rule: 10 deletions, 20 modifications, or 30 changed files with at least 10 modifications/deletions in 30 seconds. Alerts never move files automatically. You can manually quarantine a selected existing file listed in a server-folder alert; browser-picked folders and dataset results cannot be quarantined.</p>
+        <section class="panel p-4 mb-4" aria-labelledby="monitor-policy-heading">
+            <div class="dashboard-section-heading mb-3"><div><span class="dashboard-section-kicker">Live monitoring settings</span><h3 id="monitor-policy-heading" class="h5">Alert limits and quarantine</h3><p class="small muted">These limits apply to live server, browser-folder, and endpoint alerts. Counts are distinct file paths; repeated edits to one file count once. Alerts have a 60-second cooldown. Stop the server monitor before saving.</p></div></div>
+            <form @submit.prevent="saveMonitorPolicy" class="row g-3 align-items-end">
+                <label class="col-6 col-lg-2 small">Time window (seconds)<input class="form-control mt-1" type="number" min="5" max="300" x-model.number="monitorPolicy.window_seconds" @input="policyDirty=true" :disabled="status.running || busy" required></label>
+                <label class="col-6 col-lg-2 small">Deletion limit<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.delete_threshold" @input="policyDirty=true" :disabled="status.running || busy" required></label>
+                <label class="col-6 col-lg-2 small">Modification limit<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.modify_threshold" @input="policyDirty=true" :disabled="status.running || busy" required></label>
+                <label class="col-6 col-lg-2 small">Total changes limit<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.mixed_threshold" @input="policyDirty=true" :disabled="status.running || busy" required></label>
+                <label class="col-6 col-lg-2 small">Minimum deletes or edits<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.mixed_destructive_minimum" @input="policyDirty=true" :disabled="status.running || busy" required></label>
+                <div class="col-12 col-lg-2"><button class="btn-outline-custom w-100" type="submit" :disabled="status.running || busy">Save settings</button></div>
+                <div class="col-12">
+                    <label class="d-flex align-items-start gap-2"><input type="checkbox" class="form-check-input mt-1" x-model="monitorPolicy.auto_quarantine" @change="policyDirty=true" :disabled="status.running || busy"><span><strong>Automatically quarantine changed files when an alert triggers</strong><span class="small muted d-block">Moves created or modified files that still exist in the server folder. Deleted files cannot be moved. This can catch normal work by mistake; leave it off until you have tested your limits.</span></span></label>
+                    <p class="small muted mt-2 mb-0">Manual quarantine stays available from each server-folder alert. Browser-picked folders and benchmark data cannot be quarantined.</p>
+                </div>
+            </form>
+        </section>
 
 
 
@@ -326,7 +340,7 @@
                 <div><small class="muted">QUARANTINE HISTORY</small><h2 class="h4 mt-1 mb-0">Previously contained files</h2></div>
                 <button class="theme-toggle" type="button" @click="loadQuarantine" :disabled="busy" aria-label="Refresh quarantine"><i class="bi bi-arrow-clockwise"></i></button>
             </div>
-            <p class="px-4 pt-3 muted small mb-0">Files are moved only after you choose Quarantine file on a server-folder alert and confirm. Browser-picked folder activity and dataset results never move files. Restore checks the file hash and original path before returning it.</p>
+            <p class="px-4 pt-3 muted small mb-0">Server-folder files move only when you manually choose Quarantine file or enable automatic quarantine in Monitor files. Browser-picked folder activity and dataset results never move files. Restore checks the file hash and original path before returning it.</p>
             <div class="px-4 pb-3" x-show="quarantine.length">
                 <template x-for="item in quarantine" :key="item.id">
                     <article class="feed-row">
@@ -340,7 +354,7 @@
                     </article>
                 </template>
             </div>
-            <div class="empty-state" x-show="!quarantine.length"><div><span class="status-icon mx-auto mb-3"><i class="bi bi-archive"></i></span><h3 class="h5">No quarantine records</h3><p class="muted small mb-0">Choose Quarantine file on a server-folder alert to move a selected file here. You can restore it later.</p></div></div>
+            <div class="empty-state" x-show="!quarantine.length"><div><span class="status-icon mx-auto mb-3"><i class="bi bi-archive"></i></span><h3 class="h5">No quarantine records</h3><p class="muted small mb-0">Manually quarantine a file from an alert or enable automatic quarantine in Monitor files. You can restore moved files here.</p></div></div>
         </section>
         </section>
     </div>
@@ -393,6 +407,15 @@
                 monitored_files: 0,
                 last_activity: {}
             },
+            monitorPolicy: {
+                window_seconds: 30,
+                delete_threshold: 10,
+                modify_threshold: 20,
+                mixed_threshold: 30,
+                mixed_destructive_minimum: 10,
+                auto_quarantine: false
+            },
+            policyDirty: false,
             init() {
                 this.refreshAll();
                 this.refreshTimer = window.setInterval(() => this.refreshAll(false), 3000);
@@ -456,6 +479,7 @@
                     ]);
                     const alertData = await this.fetchJson(this.alertQuery());
                     this.status = summary.status;
+                    if (!this.policyDirty && summary.status.policy) this.monitorPolicy = {...summary.status.policy};
                     this.eventCount = summary.event_count;
                     this.alertCount = summary.alert_count;
                     this.events = eventData.events;
@@ -589,6 +613,17 @@
             },
             metric(value) { return value == null ? 'undefined' : (value * 100).toFixed(2) + '%'; },
             stopMonitor() { return this.performAction('{{ url_for("api.stop_monitor") }}'); },
+            async saveMonitorPolicy() {
+                const result = await this.performAction('/api/monitor/policy', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(this.monitorPolicy)
+                });
+                if (result?.ok) {
+                    this.policyDirty = false;
+                    this.monitorPolicy = {...result.policy};
+                }
+            },
             prepareSilrad() { return this.performAction('/api/silrad/prepare'); },
             async acknowledgeAlert(alertId) {
                 await this.performAction(`/api/alerts/${alertId}/acknowledge`);

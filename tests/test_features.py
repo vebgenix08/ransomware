@@ -199,6 +199,8 @@ class ResponseTests(unittest.TestCase):
         self.assertTrue(all(event.severity == "info" for event in events))
 
     def test_high_volume_modification_burst_alerts_without_auto_quarantine(self):
+        self.monitor.policy["auto_quarantine"] = False
+        self.app.config["AUTO_QUARANTINE"] = False
         targets = []
         for index in range(20):
             target = self.monitor.target_path / f"modified-{index}.txt"
@@ -218,8 +220,67 @@ class ResponseTests(unittest.TestCase):
         self.assertIn("modified-0.txt", {item["path"] for item in affected_files})
         action = ResponseAction.query.one()
         self.assertTrue(action.completed)
-        self.assertEqual(action.result["quarantine"], "below_quarantine_threshold")
+        self.assertEqual(action.result["quarantine"], "disabled")
         self.assertTrue(all(target.exists() for target in targets))
+
+    def test_custom_server_threshold_triggers_alert(self):
+        self.monitor.update_policy({
+            "window_seconds": 12,
+            "delete_threshold": 9,
+            "modify_threshold": 2,
+            "mixed_threshold": 5,
+            "mixed_destructive_minimum": 2,
+            "auto_quarantine": False,
+        })
+        targets = []
+        for index in range(2):
+            target = self.monitor.target_path / f"custom-{index}.txt"
+            target.write_text("before")
+            targets.append(target)
+        self.monitor._snapshot = take_snapshot(self.monitor.target_path)
+        for target in targets:
+            target.write_text("after and longer")
+        self.monitor._collect_once()
+        self.assertEqual(Alert.query.count(), 1)
+        self.assertIn("12 seconds", Alert.query.one().details)
+        self.assertEqual(self.monitor.policy["modify_threshold"], 2)
+
+    def test_automatic_quarantine_moves_changed_existing_server_files(self):
+        self.monitor.update_policy({
+            "window_seconds": 30,
+            "delete_threshold": 10,
+            "modify_threshold": 2,
+            "mixed_threshold": 30,
+            "mixed_destructive_minimum": 10,
+            "auto_quarantine": True,
+        })
+        targets = []
+        for index in range(2):
+            target = self.monitor.target_path / f"automatic-{index}.txt"
+            target.write_text("before")
+            targets.append(target)
+        self.monitor._snapshot = take_snapshot(self.monitor.target_path)
+        for target in targets:
+            target.write_text("modified content")
+        self.monitor._collect_once()
+        alert = Alert.query.one()
+        self.assertEqual(QuarantineItem.query.count(), 2)
+        self.assertTrue(all(not target.exists() for target in targets))
+        action = ResponseAction.query.filter_by(alert_id=alert.id).one()
+        self.assertEqual(action.result["quarantine"], "quarantined")
+        self.assertTrue(all(item["manual"] is False for item in action.result["files"]))
+
+    def test_monitor_policy_rejects_invalid_values(self):
+        invalid = {
+            "window_seconds": 301,
+            "delete_threshold": 10,
+            "modify_threshold": 20,
+            "mixed_threshold": 30,
+            "mixed_destructive_minimum": 10,
+            "auto_quarantine": False,
+        }
+        with self.assertRaises(ValueError):
+            self.monitor.update_policy(invalid)
 
     def test_burst_alert_has_cooldown(self):
         first_batch = []
