@@ -20,28 +20,16 @@
     .section-space { padding: 6.8rem 0; }
     .section-kicker { color: var(--accent); font-size: .76rem; font-weight: 850; letter-spacing: .14em; text-transform: uppercase; }
     .section-title { max-width: 760px; margin-top: .7rem; color: var(--text); font-size: clamp(2.2rem, 4.5vw, 3.8rem); font-weight: 780; letter-spacing: -.05em; line-height: 1.08; }
-    .step-card { height: 100%; padding: 1.6rem; border: 1px solid var(--line); border-radius: 1rem; background: var(--surface); transition: transform .22s ease, border-color .22s ease; }
-    .step-card:hover { transform: translateY(-5px); border-color: var(--brand); }
-    .step-icon { width: 3rem; height: 3rem; display: grid; place-items: center; color: var(--brand-strong); border-radius: .8rem; background: var(--brand-soft); font-size: 1.25rem; }
-    .step-tag, .member-number { color: var(--accent); font-size: .7rem; font-weight: 850; letter-spacing: .12em; text-transform: uppercase; }
-    .phase-state { display: inline-flex; padding: .3rem .58rem; border-radius: 999px; background: var(--surface-soft); color: var(--muted); font-size: .7rem; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; }
-    .phase-state.active { color: var(--accent); background: var(--accent-soft); }
-    .roadmap-wrap { padding: clamp(1.5rem, 4vw, 3rem); border: 1px solid var(--line); border-radius: 1.3rem; background: var(--surface); box-shadow: var(--shadow); }
-    .roadmap-item { position: relative; padding-left: 3.3rem; padding-bottom: 2.3rem; }
-    .roadmap-item:last-child { padding-bottom: 0; }
-    .roadmap-item::before { content: ""; position: absolute; top: 2.25rem; bottom: 0; left: 1.15rem; width: 1px; background: var(--line); }
-    .roadmap-item:last-child::before { display: none; }
-    .roadmap-marker { position: absolute; top: 0; left: 0; width: 2.35rem; height: 2.35rem; display: grid; place-items: center; color: var(--muted); border: 1px solid var(--line); border-radius: .7rem; background: var(--surface-soft); font-size: .82rem; font-weight: 850; }
-    .roadmap-item.complete .roadmap-marker { color: #fff; border-color: var(--brand-strong); background: var(--brand-strong); }
-    [data-theme="dark"] .roadmap-item.complete .roadmap-marker { color: #172019; }
-    .roadmap-item.current .roadmap-marker { color: #2b1c08; border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 6px var(--accent-soft); }
-    .team-card { height: 100%; overflow: hidden; border: 1px solid var(--line); border-radius: 1rem; background: var(--surface); transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease; }
-    .team-card:hover { transform: translateY(-5px); border-color: var(--brand); box-shadow: var(--shadow); }
-    .member-top { min-height: 12rem; display: grid; place-items: center; position: relative; background: linear-gradient(145deg, color-mix(in srgb, var(--brand-soft) 75%, var(--surface)), var(--surface-soft)); }
-    .member-top::after { content: attr(data-index); position: absolute; right: 1rem; top: .7rem; color: color-mix(in srgb, var(--brand) 25%, transparent); font-size: 3.5rem; font-weight: 850; }
-    .member-avatar { width: 6rem; height: 6rem; display: grid; place-items: center; color: #fff; border: 5px solid var(--surface); border-radius: 50%; background: var(--brand-strong); box-shadow: 0 14px 34px rgba(35, 70, 51, .2); font-size: 1.45rem; font-weight: 850; z-index: 1; }
-    [data-theme="dark"] .member-avatar { color: #172019; }
-    .member-body { padding: 1.35rem; }
+    .feature-row { padding: 1.5rem 0; border-top: 1px solid var(--line); }
+    .feature-index { color: var(--accent); font-size: .75rem; font-weight: 850; letter-spacing: .12em; }
+    .workflow-column { height: 100%; padding-top: 1.3rem; border-top: 2px solid var(--brand); }
+    .workflow-column.benchmark { border-color: var(--accent); }
+    .workflow-steps { list-style: none; padding: 0; margin: 1.25rem 0 0; }
+    .workflow-steps li { display: grid; grid-template-columns: 2.3rem 1fr; gap: .75rem; padding: .85rem 0; border-top: 1px solid var(--line); }
+    .workflow-step-number { color: var(--accent); font-size: .75rem; font-weight: 850; }
+    .scope-panel { padding: clamp(1.3rem, 3vw, 2.2rem); border-left: 3px solid var(--brand); background: var(--surface); }
+    .scope-panel.limits { border-left-color: var(--accent); }
+    .final-cta { padding: clamp(2rem, 5vw, 4rem); border-radius: 1.25rem; color: var(--text); background: var(--surface); }
     @media (max-width: 991.98px) { .hero { min-height: auto; padding-top: 8.5rem; } }
 </style>
 {% endblock %}
@@ -64,8 +52,8 @@
                         {% endif %}
                     </div>
                     <div class="d-flex flex-wrap gap-4 mt-5 muted small">
-                        <span><i class="bi bi-folder2 me-2" style="color:var(--brand)"></i>Browser folder monitoring</span>
-                        <span><i class="bi bi-bar-chart me-2" style="color:var(--brand)"></i>Offline SILRAD benchmark</span>
+                        <span><i class="bi bi-folder2 me-2" style="color:var(--brand)"></i>Browser · server · Windows agent</span>
+                        <span><i class="bi bi-bar-chart me-2" style="color:var(--brand)"></i>Separate offline SILRAD evaluation</span>
                     </div>
                 </div>
                 <div class="col-lg-5">
@@ -88,60 +76,71 @@
 </header>
 
 <main id="main-content">
-    <section id="how-it-works" class="section-space">
+    <section id="features" class="section-space pt-5">
         <div class="container">
             <div class="row align-items-end g-4 mb-4">
-                <div class="col-lg-8"><div class="section-kicker">How it works</div><h2 class="section-title">Two workflows. Clear evidence for each.</h2></div>
-                <div class="col-lg-4"><p class="muted mb-0">Live alerts use file-change rules. Machine-learning evaluation uses labeled dataset rows offline.</p></div>
+                <div class="col-lg-7"><div class="section-kicker">Inside the workspace</div><h2 class="section-title">One place to review file activity and research results.</h2></div>
+                <div class="col-lg-5"><p class="muted mb-0">Use the monitoring source that fits your setup. Each source reports its own activity and status.</p></div>
             </div>
             <div class="row g-4">
-                {% set steps = [
-                    ('bi-activity', 'Collect folder activity', 'Observe file creates, changes, and deletes in one configured directory. The app does not attribute changes to a process.'),
-                    ('bi-funnel', 'Apply live burst rules', 'Count distinct file changes in the time window and limits you set. The activity score is a heuristic, not a malware probability.'),
-                    ('bi-diagram-3', 'Run the RansomShield Online Benchmark', 'Test an incremental model on a published Sysmon stream. The benchmark uses SILRAD data and does not drive live alerts.'),
-                    ('bi-bell', 'Review evidence', 'See the source, observed counts, model results, and downloadable reports. Server-folder quarantine can be manual or automatic if you turn it on.')
-                ] %}
-                {% for icon, title, copy in steps %}
-                    <div class="col-md-6 col-xl-3">
-                        <article class="step-card">
-                            <div class="d-flex align-items-center justify-content-between"><span class="step-icon"><i class="bi {{ icon }}"></i></span><span class="step-tag">STEP 0{{ loop.index }}</span></div>
-                            <h3 class="h5 mt-4">{{ title }}</h3><p class="muted mb-0">{{ copy }}</p>
-                        </article>
-                    </div>
-                {% endfor %}
+                <div class="col-lg-4"><article class="feature-row h-100"><span class="feature-index">01 · MONITOR</span><h3 class="h4 mt-3">Three folder sources</h3><p class="muted mb-0">Choose a browser folder, watch a folder on the app server, or run the Windows agent on another computer.</p></article></div>
+                <div class="col-lg-4"><article class="feature-row h-100"><span class="feature-index">02 · REVIEW</span><h3 class="h4 mt-3">Activity, paths, and alerts</h3><p class="muted mb-0">Review created, modified, and deleted files with their source and relative paths. Alerts are rule-based signals for human review.</p></article></div>
+                <div class="col-lg-4"><article class="feature-row h-100"><span class="feature-index">03 · EVALUATE</span><h3 class="h4 mt-3">Separate dataset benchmark</h3><p class="muted mb-0">Run the published SILRAD dataset benchmark and review its held-out metrics. Its model does not drive live file alerts.</p></article></div>
             </div>
         </div>
     </section>
 
-    <section id="roadmap" class="section-space">
+    <section id="how-it-works" class="section-space">
         <div class="container">
-            <div class="row g-5 align-items-start">
-                <div class="col-lg-5">
-                    <div class="section-kicker">Project roadmap</div><h2 class="section-title">Building RansomShield one validated layer at a time.</h2>
-                    <p class="muted mt-4">Status reflects the current local implementation. Synthetic results do not establish real-world detection performance.</p>
-                    <div class="mt-4 p-4 rounded-4" style="background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 24%,transparent)"><div class="d-flex gap-3"><i class="bi bi-compass fs-4" style="color:var(--accent)"></i><div><strong class="d-block mb-1">Next research milestone</strong><span class="muted small">Collect independently labeled endpoint telemetry and validate the live rules against benign and ransomware activity. Current live alerts are not malware verdicts.</span></div></div></div>
-                </div>
-                <div class="col-lg-7">
-                    <div class="roadmap-wrap">
-                        <article class="roadmap-item complete"><span class="roadmap-marker"><i class="bi bi-check-lg"></i></span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 01</span><span class="phase-state">Completed</span></div><h3 class="h5">Research and system design</h3><p class="muted mb-0">Define the problem, related work, behavioral signals, and hybrid architecture.</p></article>
-                        <article class="roadmap-item complete"><span class="roadmap-marker">02</span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 02</span><span class="phase-state">Completed</span></div><h3 class="h5">Flask application and accounts</h3><p class="muted mb-0">Authentication, live dashboard, run history, incident details and downloadable CSV reports are implemented and locally tested.</p></article>
-                        <article class="roadmap-item complete"><span class="roadmap-marker">03</span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 03</span><span class="phase-state">Research prototype</span></div><h3 class="h5">Behavior model and response audit</h3><p class="muted mb-0">The telemetry model was trained on synthetic sequences. It is experimental and has not been validated on live endpoint ransomware behavior.</p></article>
-                        <article class="roadmap-item complete"><span class="roadmap-marker">04</span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 04</span><span class="phase-state">Completed locally</span></div><h3 class="h5">Published dataset integration</h3><p class="muted mb-0">Published MLRan CSV integrated with a separately trained XGBoost model: 2,300 training and 324 held-out samples. Results apply to this dataset only.</p></article>
-                        <article class="roadmap-item current"><span class="roadmap-marker">05</span><div class="d-flex gap-2 mb-2"><span class="member-number">Phase 05</span><span class="phase-state active">In progress</span></div><h3 class="h5">Independent endpoint validation</h3><p class="muted mb-0">The remaining research milestone is testing live monitoring against independently labeled endpoint activity and measuring false positives and missed events.</p></article>
-                    </div>
-                </div>
+            <div class="row align-items-end g-4 mb-5">
+                <div class="col-lg-8"><div class="section-kicker">How it works</div><h2 class="section-title">Two separate workflows, clearly labeled.</h2></div>
+                <div class="col-lg-4"><p class="muted mb-0">Live monitoring uses file-change rules. SILRAD evaluates labeled dataset events offline.</p></div>
+            </div>
+            <div class="row g-5">
+                <div class="col-lg-6"><article class="workflow-column">
+                    <span class="eyebrow">Live file monitoring</span>
+                    <h3 class="h3 mt-3">Observe changes. Review alerts.</h3>
+                    <ol class="workflow-steps">
+                        <li><span class="workflow-step-number">01</span><span><strong>Choose a source.</strong> Browser folder, app-server folder, or Windows endpoint agent.</span></li>
+                        <li><span class="workflow-step-number">02</span><span><strong>Record file activity.</strong> Track file creates, modifications, deletes, and relative paths.</span></li>
+                        <li><span class="workflow-step-number">03</span><span><strong>Apply burst rules.</strong> Compare activity counts with your configured thresholds.</span></li>
+                        <li><span class="workflow-step-number">04</span><span><strong>Review and respond.</strong> Acknowledge alerts; quarantine is manual for browser/agent files and optionally automatic for the server folder.</span></li>
+                    </ol>
+                </article></div>
+                <div class="col-lg-6"><article class="workflow-column benchmark">
+                    <span class="eyebrow">Offline SILRAD benchmark</span>
+                    <h3 class="h3 mt-3">Evaluate labeled events.</h3>
+                    <ol class="workflow-steps">
+                        <li><span class="workflow-step-number">01</span><span><strong>Prepare published data.</strong> Download the SILRAD training and test files to the server.</span></li>
+                        <li><span class="workflow-step-number">02</span><span><strong>Select a threshold.</strong> Use the training split only.</span></li>
+                        <li><span class="workflow-step-number">03</span><span><strong>Evaluate the held-out stream.</strong> Predict each event before using its known label for the next update.</span></li>
+                        <li><span class="workflow-step-number">04</span><span><strong>Review metrics.</strong> See precision, recall, false alarms, and missed events for this dataset.</span></li>
+                    </ol>
+                </article></div>
             </div>
         </div>
     </section>
 
-    <section id="team" class="section-space">
+    <section id="research-scope" class="section-space pt-0">
         <div class="container">
-            <div class="text-center mx-auto mb-5" style="max-width:760px"><div class="section-kicker">Meet our team</div><h2 class="section-title mx-auto">Four members working toward one clear security goal.</h2><p class="muted mt-3">The student team behind the research, design, development, and evaluation of RansomShield.</p></div>
+            <div class="row align-items-end g-4 mb-4">
+                <div class="col-lg-8"><div class="section-kicker">Research scope</div><h2 class="section-title">Know what each result means.</h2></div>
+                <div class="col-lg-4"><p class="muted mb-0">Clear limits help prevent a research signal from being mistaken for a security verdict.</p></div>
+            </div>
             <div class="row g-4">
-                {% set members = [('AM', 'Archana M'), ('CT', 'Chandan T N'), ('GP', 'Gouri K Patil'), ('KS', 'Karan S')] %}
-                {% for initials, name in members %}
-                    <div class="col-sm-6 col-xl-3"><article class="team-card"><div class="member-top" data-index="0{{ loop.index }}"><div class="member-avatar">{{ initials }}</div></div><div class="member-body"><span class="member-number">Team member 0{{ loop.index }}</span><h3 class="h5 mt-2 mb-1">{{ name }}</h3><p class="muted small mb-0">Research &amp; Development Team</p></div></article></div>
-                {% endfor %}
+                <div class="col-lg-6"><div class="scope-panel h-100"><h3 class="h5">What RansomShield does</h3><ul class="muted mb-0"><li>Records file activity from the selected monitoring source.</li><li>Raises review alerts when configured burst rules are crossed.</li><li>Provides manual quarantine options and optional server-folder auto-quarantine.</li><li>Evaluates labeled SILRAD data in a separate offline workflow.</li></ul></div></div>
+                <div class="col-lg-6"><div class="scope-panel limits h-100"><h3 class="h5">What results do not prove</h3><ul class="muted mb-0"><li>A live alert does not confirm ransomware or identify the process responsible.</li><li>A rule score is not a probability of infection.</li><li>Dataset metrics do not prove live endpoint detection performance.</li><li>This research prototype is not a replacement for endpoint security software.</li></ul></div></div>
+            </div>
+            <div class="final-cta mt-5 d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-4">
+                <div><span class="section-kicker">Start using the application</span><h2 class="h3 mt-2 mb-1">Review activity in your workspace.</h2><p class="muted mb-0">Create an account or sign in to open the monitoring dashboard.</p></div>
+                <div class="d-flex flex-wrap gap-3">
+                    {% if current_user.is_authenticated %}
+                        <a class="btn-brand" href="{{ url_for('main.dashboard') }}">Open dashboard <i class="bi bi-arrow-right ms-2"></i></a>
+                    {% else %}
+                        <a class="btn-brand" href="{{ url_for('auth.signup') }}">Create account <i class="bi bi-arrow-right ms-2"></i></a>
+                        <a class="btn-outline-custom" href="{{ url_for('auth.signin') }}">Sign in</a>
+                    {% endif %}
+                </div>
             </div>
         </div>
     </section>

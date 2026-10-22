@@ -224,15 +224,12 @@
     <nav class="site-nav fixed-top" aria-label="Primary navigation">
         <div class="container py-3">
             <div class="d-flex align-items-center justify-content-between">
-                <a class="d-flex align-items-center gap-3" href="{{ url_for('main.index') }}" aria-label="RansomShield home">
+                <a class="d-flex align-items-center gap-3" href="{{ url_for('main.dashboard') if current_user.is_authenticated else url_for('main.index') }}" aria-label="RansomShield home">
                     <span class="brand-mark"><i class="bi bi-shield-check"></i></span>
                     <span class="brand-name">Ransom<span>Shield</span></span>
                 </a>
 
                 <div class="d-none d-lg-flex align-items-center gap-4">
-                    <a class="nav-item-link" href="{{ url_for('main.index') }}#how-it-works">How it works</a>
-                    <a class="nav-item-link" href="{{ url_for('main.index') }}#roadmap">Roadmap</a>
-                    <a class="nav-item-link" href="{{ url_for('main.index') }}#team">Our team</a>
                     {% if current_user.is_authenticated %}
                         <a class="nav-item-link" href="{{ url_for('main.dashboard') }}">Dashboard</a>
                         <form method="post" action="{{ url_for('auth.logout') }}">
@@ -240,6 +237,9 @@
                             <button class="btn-outline-custom py-2" type="submit">Sign out</button>
                         </form>
                     {% else %}
+                        <a class="nav-item-link" href="{{ url_for('main.index') }}#features">Capabilities</a>
+                        <a class="nav-item-link" href="{{ url_for('main.index') }}#how-it-works">How it works</a>
+                        <a class="nav-item-link" href="{{ url_for('main.index') }}#research-scope">Research scope</a>
                         <a class="nav-item-link" href="{{ url_for('auth.signin') }}">Sign in</a>
                         <a class="btn-brand py-2" href="{{ url_for('auth.signup') }}">Create account</a>
                     {% endif %}
@@ -260,9 +260,6 @@
 
             <div x-cloak x-show="mobileOpen" x-transition class="mobile-menu d-lg-none">
                 <div class="d-grid gap-3">
-                    <a class="nav-item-link" @click="mobileOpen = false" href="{{ url_for('main.index') }}#how-it-works">How it works</a>
-                    <a class="nav-item-link" @click="mobileOpen = false" href="{{ url_for('main.index') }}#roadmap">Roadmap</a>
-                    <a class="nav-item-link" @click="mobileOpen = false" href="{{ url_for('main.index') }}#team">Our team</a>
                     {% if current_user.is_authenticated %}
                         <a class="nav-item-link" href="{{ url_for('main.dashboard') }}">Dashboard</a>
                         <form method="post" action="{{ url_for('auth.logout') }}">
@@ -270,6 +267,9 @@
                             <button class="btn-outline-custom w-100" type="submit">Sign out</button>
                         </form>
                     {% else %}
+                        <a class="nav-item-link" @click="mobileOpen = false" href="{{ url_for('main.index') }}#features">Capabilities</a>
+                        <a class="nav-item-link" @click="mobileOpen = false" href="{{ url_for('main.index') }}#how-it-works">How it works</a>
+                        <a class="nav-item-link" @click="mobileOpen = false" href="{{ url_for('main.index') }}#research-scope">Research scope</a>
                         <a class="nav-item-link" href="{{ url_for('auth.signin') }}">Sign in</a>
                         <a class="btn-brand" href="{{ url_for('auth.signup') }}">Create account</a>
                     {% endif %}
@@ -298,34 +298,37 @@
         <div class="container">
             <div class="row g-4 align-items-start pb-4">
                 <div class="col-lg-6">
-                    <a class="d-inline-flex align-items-center gap-3" href="{{ url_for('main.index') }}">
+                    <a class="d-inline-flex align-items-center gap-3" href="{{ url_for('main.dashboard') if current_user.is_authenticated else url_for('main.index') }}">
                         <span class="brand-mark"><i class="bi bi-shield-check"></i></span>
                         <span class="brand-name">Ransom<span>Shield</span></span>
                     </a>
-                    <p class="muted mt-3 mb-0" style="max-width:500px">A file activity monitoring and alerting research prototype developed at Bapuji Institute of Engineering and Technology.</p>
+                    <p class="muted mt-3 mb-0" style="max-width:500px">A research prototype for reviewing file activity and separately evaluating published security data.</p>
                 </div>
-                <div class="col-6 col-lg-3">
-                    <strong class="d-block mb-3">Explore</strong>
-                    <div class="d-grid gap-2 small">
-                        <a class="footer-link" href="{{ url_for('main.index') }}#how-it-works">How it works</a>
-                        <a class="footer-link" href="{{ url_for('main.index') }}#roadmap">Roadmap</a>
-                        <a class="footer-link" href="{{ url_for('main.index') }}#team">Team</a>
+                {% if current_user.is_authenticated %}
+                    <div class="col-lg-3">
+                        <strong class="d-block mb-3">Workspace</strong>
+                        <a class="footer-link small" href="{{ url_for('main.dashboard') }}">Open dashboard</a>
                     </div>
-                </div>
-                <div class="col-6 col-lg-3">
-                    <strong class="d-block mb-3">Account</strong>
-                    <div class="d-grid gap-2 small">
-                        {% if current_user.is_authenticated %}
-                            <a class="footer-link" href="{{ url_for('main.dashboard') }}">Dashboard</a>
-                        {% else %}
+                {% else %}
+                    <div class="col-6 col-lg-3">
+                        <strong class="d-block mb-3">Product</strong>
+                        <div class="d-grid gap-2 small">
+                            <a class="footer-link" href="{{ url_for('main.index') }}#features">Capabilities</a>
+                            <a class="footer-link" href="{{ url_for('main.index') }}#how-it-works">How it works</a>
+                            <a class="footer-link" href="{{ url_for('main.index') }}#research-scope">Research scope</a>
+                        </div>
+                    </div>
+                    <div class="col-6 col-lg-3">
+                        <strong class="d-block mb-3">Account</strong>
+                        <div class="d-grid gap-2 small">
                             <a class="footer-link" href="{{ url_for('auth.signin') }}">Sign in</a>
                             <a class="footer-link" href="{{ url_for('auth.signup') }}">Create account</a>
-                        {% endif %}
+                        </div>
                     </div>
-                </div>
+                {% endif %}
             </div>
             <div class="d-flex flex-column flex-md-row justify-content-between gap-2 pt-4 muted small" style="border-top:1px solid var(--line)">
-                <span>&copy; <span x-text="year"></span> RansomShield Project Team.</span>
+                <span>&copy; <span x-text="year"></span> RansomShield research prototype.</span>
                 <span>Designed for responsible cybersecurity research.</span>
             </div>
         </div>
