@@ -22,7 +22,7 @@ Open the new `.env` file. Paste the generated value after `SECRET_KEY=`. For a b
 .\.venv\Scripts\python.exe run.py
 ```
 
-Open <http://127.0.0.1:5000>, create an account, and sign in. Keep the terminal open while using the app; press **Ctrl+C** in that terminal to stop it. Never commit or share `.env`.
+The terminal prints the local URL and port when the server starts (normally <http://127.0.0.1:5000>). Open that address, create an account, and sign in. Keep the terminal open while using the app; press **Ctrl+C** in that terminal to stop it. In PowerShell, enter the run command on one line with no backslash at the end. Never commit or share `.env`.
 
 ## Optional services
 

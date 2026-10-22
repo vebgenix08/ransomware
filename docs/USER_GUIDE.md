@@ -26,7 +26,7 @@ From the project folder in PowerShell:
 .\.venv\Scripts\python.exe run.py
 ```
 
-Open <http://127.0.0.1:5000>, create an account with an email you can access, and sign in. Keep the terminal open while using the app; press **Ctrl+C** there to stop it. If PowerShell says the address is already in use, another RansomShield server is running on port 5000.
+The terminal prints the exact local URL and port when the server starts. Open the printed address (normally <http://127.0.0.1:5000>), create an account with an email you can access, and sign in. Keep the terminal open while using the app; press **Ctrl+C** there to stop it. In PowerShell, enter the command on one line with no backslash at the end. If the port was customized in `.env`, use the port shown in the terminal.
 
 ## Configure Firebase and email
 
