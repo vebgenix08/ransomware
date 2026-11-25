@@ -70,7 +70,8 @@ if (-not (Test-Path -LiteralPath $TargetPath -PathType Container)) {
 
 if ($Scenario -eq 'guided') {
     $maximumDemoFiles = 5000
-    $demoFolderName = 'RansomShield-Guided-Demo-' + [guid]::NewGuid().ToString('N')
+    $demoRunId = [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $demoFolderName = "RS-G-$demoRunId"
     $demoFolder = Join-Path $TargetPath $demoFolderName
     New-Item -ItemType Directory -Path $demoFolder | Out-Null
 
@@ -189,7 +190,8 @@ switch ($Scenario) {
     }
 }
 
-$demoFolderName = 'RansomShield-Random-Demo-' + [guid]::NewGuid().ToString('N')
+$demoRunId = [guid]::NewGuid().ToString('N').Substring(0, 8)
+$demoFolderName = "RS-R-$demoRunId"
 $demoFolder = Join-Path $TargetPath $demoFolderName
 New-Item -ItemType Directory -Path $demoFolder | Out-Null
 $files = for ($i = 1; $i -le $operationCount; $i++) {
