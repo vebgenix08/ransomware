@@ -12,11 +12,6 @@
     .howto-step { display:grid; grid-template-columns:2rem minmax(0,1fr); gap:.8rem; padding:1rem 0; border-bottom:1px solid var(--line); }
     .howto-step:last-child { border-bottom:0; }
     .howto-number { display:grid; place-items:center; width:2rem; height:2rem; border-radius:50%; color:var(--brand-strong); background:var(--brand-soft); font-weight:800; }
-    .monitor-stats { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.65rem 1rem; }
-    .monitor-stats > div { display:flex; flex-direction:column; gap:.15rem; padding:.65rem 0; border-top:1px solid var(--line); }
-    .monitor-stats span { color:var(--muted); font-size:.74rem; }
-    .monitor-stats strong { font-size:.85rem; }
-    @media(max-width:575.98px) { .monitor-stats { grid-template-columns:1fr; } }
     .status-card { height: 100%; padding: 1.35rem; border: 1px solid var(--line); border-radius: 1rem; background: var(--surface); }
     .status-icon { width: 2.8rem; height: 2.8rem; display: grid; place-items: center; color: var(--brand-strong); border-radius: .75rem; background: var(--brand-soft); font-size: 1.15rem; }
     .metric-value { font-size: 2rem; font-weight: 780; letter-spacing: -.04em; }
@@ -118,21 +113,26 @@
             <div><span class="dashboard-section-kicker">File monitoring</span><h2 class="h4 mb-1">Monitor files</h2><p class="small muted mb-0">Choose a folder source, review its status, and manage alert rules.</p></div>
             <span class="state-badge" :class="status.running ? 'running' : ''"><span class="state-dot"></span><span x-text="status.running ? 'Server monitor running' : 'Server monitor stopped'"></span></span>
         </div>
-        <div class="row g-4 mb-4">
-            <div class="col-lg-6">
-                <section class="panel p-4 h-100" aria-labelledby="device-folder-heading">
-                    <span class="dashboard-section-kicker">This computer · browser access</span>
-                    <h3 id="device-folder-heading" class="h5 mt-1">Watch a folder on this device</h3>
-                    <p class="small muted">Select a safe test folder. Keep this page open while monitoring.</p>
-                    <div class="d-flex flex-wrap align-items-center gap-2">
+        <div class="monitor-source-grid mb-4">
+            <section class="panel monitor-source-card" aria-labelledby="device-folder-heading">
+                    <div class="monitor-source-heading">
+                        <div class="monitor-source-title">
+                            <span class="monitor-source-icon" aria-hidden="true"><i class="bi bi-laptop"></i></span>
+                            <div><span class="dashboard-section-kicker">This computer · browser access</span><h3 id="device-folder-heading" class="h5 mb-0">Watch a folder on this device</h3></div>
+                        </div>
+                        <span class="state-badge" :class="folderWatching ? 'running' : ''"><span class="state-dot"></span><span x-text="folderWatching ? 'Watching' : 'Not watching'"></span></span>
+                    </div>
+                    <p class="monitor-source-copy">Choose a folder on this computer. Keep this page open while it is being watched.</p>
+                    <div class="monitor-source-actions">
                         <button class="btn-brand" type="button" @click="chooseFolder" :disabled="folderBusy || folderWatching"><i class="bi bi-folder2-open me-2"></i>Choose folder</button>
                         <button class="btn-outline-custom" type="button" @click="stopFolderWatch" :disabled="!folderWatching"><i class="bi bi-stop-fill me-2"></i>Stop</button>
                     </div>
-                    <div class="mt-3"><span class="state-badge" :class="folderWatching ? 'running' : ''"><span class="state-dot"></span><span x-text="folderWatching ? 'Watching in this browser' : 'Not watching'"></span></span></div>
-                    <p class="small mt-3 mb-0" :class="folderMessageType === 'error' ? 'text-danger' : 'muted'" x-text="folderMessage || 'Choose a folder to begin. Browser support notes are below.'" role="status"></p>
-                    <p class="small muted mt-2 mb-0" x-show="folderName">Folder: <strong x-text="folderName"></strong> · <span x-text="folderFileCount"></span> files</p>
-                    <div class="mt-3" x-show="folderQuarantineRecords.length">
-                        <strong class="small">Quarantined in this selected folder</strong>
+                    <div class="monitor-source-feedback">
+                        <p class="small mb-0" :class="folderMessageType === 'error' ? 'text-danger' : 'muted'" x-text="folderMessage || 'Choose a folder to begin.'" role="status"></p>
+                        <p class="monitor-selection" x-show="folderName"><i class="bi bi-folder2 me-1" aria-hidden="true"></i><strong x-text="folderName"></strong><span class="muted"> · </span><span x-text="folderFileCount"></span><span class="muted"> files</span></p>
+                    </div>
+                    <div class="monitor-quarantine-list" x-show="folderQuarantineRecords.length">
+                        <strong class="small d-block mb-1">Quarantined in this selected folder</strong>
                         <template x-for="item in folderQuarantineRecords" :key="item.id">
                             <div class="feed-row py-2">
                                 <div class="min-w-0"><span class="small d-block text-break" x-text="item.original_path"></span><span class="muted" style="font-size:.72rem" x-text="item.status === 'restored' ? 'Restored ' + formatDate(item.restored_at) : item.status === 'quarantined' ? 'Quarantined locally · ' + item.size_bytes + ' bytes · SHA-256 ' + item.sha256.slice(0, 16) + '…' : 'Needs review · file was not changed automatically'"></span></div>
@@ -140,41 +140,47 @@
                             </div>
                         </template>
                     </div>
-                    <details class="small mt-3"><summary>Browser support and privacy</summary><p class="muted mt-2 mb-0">Chrome or Edge asks for read/write access. Files move inside the selected folder to <code>RansomShield Quarantine</code>; file contents are not uploaded. Keep this page open to monitor. Brave may disable the folder-access API.</p></details>
-                </section>
-            </div>
-            <div class="col-lg-6">
-                <section class="panel p-4 h-100" aria-labelledby="server-monitor-heading">
-                    <span class="dashboard-section-kicker">Application server</span>
-                    <h3 id="server-monitor-heading" class="h5 mt-1">Watch the server folder</h3>
-                    <p class="small muted">This watches the folder on the computer running the app. It is not the folder picker for this device.</p>
-                    <div class="safe-note mb-3"><span class="small muted d-block">Folder being watched</span><code class="text-break" style="color:var(--text)" x-text="status.target"></code></div>
-                    <p class="small muted">To change this folder, edit <code>MONITOR_TARGET_PATH</code> in the project’s <code>.env</code> file, then restart RansomShield.</p>
-                    <div class="d-flex flex-wrap align-items-center gap-2">
+                    <details class="monitor-help small"><summary>Browser support and privacy</summary><p class="muted mt-2 mb-0">Chrome or Edge asks for read/write access. Files move inside the selected folder to <code>RansomShield Quarantine</code>; file contents are not uploaded. Keep this page open to monitor. Brave may disable the folder-access API.</p></details>
+            </section>
+            <section class="panel monitor-source-card" aria-labelledby="server-monitor-heading">
+                    <div class="monitor-source-heading">
+                        <div class="monitor-source-title">
+                            <span class="monitor-source-icon" aria-hidden="true"><i class="bi bi-hdd-network"></i></span>
+                            <div><span class="dashboard-section-kicker">Application server</span><h3 id="server-monitor-heading" class="h5 mb-0">Watch the server folder</h3></div>
+                        </div>
+                        <span class="state-badge" :class="status.running ? 'running' : ''"><span class="state-dot"></span><span x-text="status.connection_state"></span></span>
+                    </div>
+                    <p class="monitor-source-copy">Monitors the folder on the computer running this application.</p>
+                    <div class="monitor-path-block"><span class="monitor-field-label">Folder path</span><code class="text-break" x-text="status.target"></code></div>
+                    <p class="monitor-config-note"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Change <code>MONITOR_TARGET_PATH</code> in the project’s <code>.env</code> file, then restart RansomShield.</p>
+                    <div class="monitor-source-actions">
                         <button class="btn-brand" type="button" @click="startMonitor" :disabled="busy || status.running"><i class="bi bi-play-fill me-2"></i>Start server monitor</button>
                         <button class="btn-outline-custom" type="button" @click="stopMonitor" :disabled="busy || !status.running"><i class="bi bi-stop-fill me-2"></i>Stop server monitor</button>
-                        <span class="state-badge" :class="status.running ? 'running' : ''" x-text="status.connection_state"></span>
                     </div>
-                    <div class="monitor-stats mt-4">
+                    <div class="monitor-stats">
                         <div><span>Files currently in folder</span><strong x-text="status.monitored_files || 0"></strong></div>
                         <div><span>Last changes</span><strong><span x-text="status.last_activity?.files_touched || 0"></span> files</strong></div>
                         <div><span>Change rate</span><strong><span x-text="status.last_activity?.operation_rate || 0"></span>/sec</strong></div>
                         <div><span>Last scan</span><strong x-text="status.last_successful_scan ? formatDate(status.last_successful_scan) : 'Not started'"></strong></div>
                     </div>
-                </section>
-            </div>
+            </section>
         </div>
         <section class="panel monitor-policy mb-4" aria-labelledby="monitor-policy-heading">
-            <div class="monitor-policy-heading"><div><span class="dashboard-section-kicker">Live monitoring settings</span><h3 id="monitor-policy-heading" class="h5 mt-1 mb-1">Alert limits and quarantine</h3><p class="small muted mb-0">Rules apply across live folder and endpoint monitoring. Stop the server monitor before changing shared settings.</p></div><span class="policy-cooldown"><i class="bi bi-clock-history me-1"></i>60-second cooldown</span></div>
-            <form @submit.prevent="saveMonitorPolicy" class="row g-3 align-items-end">
-                <div class="col-6 col-lg-4"><label class="small w-100">Time window (seconds)<input class="form-control mt-1" type="number" min="5" max="300" x-model.number="monitorPolicy.window_seconds" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label></div>
-                <div class="col-6 col-lg-4"><label class="small w-100">Deletion limit<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.delete_threshold" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label></div>
-                <div class="col-6 col-lg-4"><label class="small w-100">Modification limit<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.modify_threshold" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label></div>
-                <div class="col-6 col-lg-4"><label class="small w-100">Total changes limit<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.mixed_threshold" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label></div>
-                <div class="col-6 col-lg-4"><label class="small w-100">Minimum deletes or edits<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.mixed_destructive_minimum" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label></div>
-                <div class="col-6 col-lg-4"><button class="btn-outline-custom w-100" type="submit" :disabled="status.running || status.settings_locked || busy">Save settings</button></div>
-                <div class="col-12"><div class="quarantine-settings">
-                    <label class="quarantine-toggle"><input type="checkbox" class="form-check-input mt-1" x-model="monitorPolicy.auto_quarantine" @change="policyDirty=true" :disabled="status.running || status.settings_locked || busy"><span><strong>Automatically quarantine changed files</strong><span class="small muted d-block">When a server-folder alert triggers, eligible files move immediately. Deleted files cannot be moved.</span></span></label>
+            <div class="monitor-policy-heading"><div><span class="dashboard-section-kicker">Live monitoring settings</span><h3 id="monitor-policy-heading" class="h5 mt-1 mb-1">Alert limits and quarantine</h3><p class="small muted mb-0">Set the activity levels that trigger alerts and decide whether eligible server files move automatically.</p></div><span class="policy-cooldown"><i class="bi bi-clock-history me-1"></i>60-second cooldown</span></div>
+            <form @submit.prevent="saveMonitorPolicy" class="monitor-policy-form">
+                <div class="policy-threshold-grid" aria-label="Alert thresholds">
+                    <label class="policy-field">Time window <span>(seconds)</span><input class="form-control" type="number" min="5" max="300" x-model.number="monitorPolicy.window_seconds" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label>
+                    <label class="policy-field">Deletion limit <span>(files)</span><input class="form-control" type="number" min="1" max="5000" x-model.number="monitorPolicy.delete_threshold" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label>
+                    <label class="policy-field">Modification limit <span>(files)</span><input class="form-control" type="number" min="1" max="5000" x-model.number="monitorPolicy.modify_threshold" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label>
+                    <label class="policy-field">Total changes <span>(files)</span><input class="form-control" type="number" min="1" max="5000" x-model.number="monitorPolicy.mixed_threshold" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label>
+                    <label class="policy-field">Minimum deletes or edits <span>(files)</span><input class="form-control" type="number" min="1" max="5000" x-model.number="monitorPolicy.mixed_destructive_minimum" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label>
+                </div>
+                <div class="policy-save-row"><span class="small muted" x-show="status.running || status.settings_locked">Stop the server monitor before changing shared rules.</span><span class="small muted" x-show="!status.running && !status.settings_locked">Changes apply to live folder and endpoint monitoring.</span><button class="btn-brand" type="submit" :disabled="status.running || status.settings_locked || busy"><i class="bi bi-check2 me-1" aria-hidden="true"></i>Save monitoring settings</button></div>
+                <div class="quarantine-settings">
+                    <div class="quarantine-heading">
+                        <label class="quarantine-toggle"><input type="checkbox" class="form-check-input mt-1" x-model="monitorPolicy.auto_quarantine" @change="policyDirty=true" :disabled="status.running || status.settings_locked || busy"><span><strong>Automatically quarantine eligible files</strong><span class="small muted d-block">When a server-folder alert triggers, eligible files move immediately. Deleted files cannot be moved.</span></span></label>
+                        <span class="quarantine-state" :class="monitorPolicy.auto_quarantine ? 'enabled' : ''"><span class="state-dot"></span><span x-text="monitorPolicy.auto_quarantine ? 'Enabled' : 'Disabled'"></span></span>
+                    </div>
                     <div class="row g-3 mt-1">
                         <label class="col-12 col-lg-4 small">Maximum files per alert<input class="form-control mt-1" type="number" min="1" max="100" x-model.number="monitorPolicy.auto_quarantine_max_files" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy"></label>
                         <label class="col-12 col-lg-4 small">Excluded extensions<input class="form-control mt-1" type="text" x-model="quarantineExcludedExtensionsText" @input="policyDirty=true" placeholder=".tmp, .log" :disabled="status.running || status.settings_locked || busy"><span class="muted">Comma separated</span></label>
@@ -185,17 +191,20 @@
                         <ul class="mt-2 mb-0"><template x-for="file in (latestServerFolderAlert()?.rule_trace || []).find(item => item.signal === 'affected_files')?.value || []" :key="file.path"><li><span x-text="file.path"></span> · <span x-text="(file.operations || []).join(', ')"></span></li></template></ul>
                     </details>
                     <p class="small muted mt-2 mb-0" x-show="monitorPolicy.auto_quarantine && !latestServerFolderAlert()">No recent server-folder alert is available to preview yet. Future affected paths will be listed on their alerts.</p>
-                    <p class="small muted mt-2 mb-0">Restore location: <code x-text="status.quarantine_location || 'Loading…'"></code>. Selected-folder files still require a manual action.</p>
-                    <p class="small muted mt-1 mb-0">Current mode: <strong x-text="status.quarantine_mode || 'Loading…'"></strong></p>
-                    <p class="small text-warning mt-1 mb-0" x-show="status.quarantine_mode === 'dry-run'">Dry-run records what would be moved but leaves files in place. Saving automatic quarantine from this page switches to active moves.</p>
+                    <div class="quarantine-meta">
+                        <p class="small muted mb-0"><span class="monitor-field-label">Restore location</span><code class="text-break" x-text="status.quarantine_location || 'Loading…'"></code></p>
+                        <p class="small muted mb-0"><span class="monitor-field-label">Current mode</span><strong x-text="status.quarantine_mode || 'Loading…'"></strong><span class="d-block">Selected-folder files still require a manual action.</span></p>
+                    </div>
+                    <p class="small text-warning mt-3 mb-0" x-show="status.quarantine_mode === 'dry-run'"><i class="bi bi-info-circle me-1" aria-hidden="true"></i>Dry-run records what would move but leaves files in place. Saving automatic quarantine switches to active moves.</p>
                     <p class="quarantine-warning small mt-3 mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Automatic quarantine moves files immediately. Test with a safe folder and exclude important folders.</p>
-                </div></div>
+                </div>
             </form>
-            <div class="mt-3 d-flex flex-wrap align-items-center gap-2">
+            <div class="policy-validation">
+                <div><span class="dashboard-section-kicker">Rule validation</span><p class="small muted mb-0">Review saved activity or compare rules with labeled sample scenarios.</p></div>
                 <button type="button" class="btn-outline-custom" @click="simulatePolicy" :disabled="busy">Replay saved activity (unlabeled)</button>
-                <span class="small muted" x-show="policySimulation" x-text="policySimulation ? `${policySimulation.would_alert_count} alert window(s) would have triggered from ${policySimulation.events_replayed} saved file changes. This does not tell false alarms from attacks.` : ''"></span>
                 <button type="button" class="btn-outline-custom" @click="validateSyntheticPolicy" :disabled="busy">Validate labeled synthetic scenarios</button>
             </div>
+            <p class="small muted px-4 mt-2 mb-0" x-show="policySimulation" x-text="policySimulation ? `${policySimulation.would_alert_count} alert window(s) would have triggered from ${policySimulation.events_replayed} saved file changes. This does not tell false alarms from attacks.` : ''"></p>
             <p class="small text-danger mt-2 mb-0" x-show="policySimulationError" x-text="policySimulationError"></p>
             <div class="mt-3" x-show="syntheticValidation">
                 <p class="small mb-2" x-text="syntheticSummary(syntheticValidation)"></p>
