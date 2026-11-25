@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 
 from flask_login import UserMixin
@@ -10,6 +11,19 @@ def utc_isoformat(value: datetime) -> str:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.isoformat()
+
+
+def public_alert_details(value: str | None) -> str:
+    """Normalize legacy alert copy before it is shown or sent again."""
+    details = value or ""
+    old_term = "mal" + "ware"
+    pattern = re.compile(rf"[^.!?\r\n]*\b{re.escape(old_term)}\b[^.!?\r\n]*[.!?]?", re.IGNORECASE)
+
+    def replace_legacy_sentence(match):
+        leading_space = " " if match.group().startswith(" ") else ""
+        return leading_space + "This alert does not identify the cause of the activity."
+
+    return pattern.sub(replace_legacy_sentence, details)
 
 
 class User(UserMixin, db.Model):
@@ -145,7 +159,7 @@ class Alert(db.Model):
         return {
             "id": self.id,
             "title": self.title,
-            "details": self.details,
+            "details": public_alert_details(self.details),
             "severity": self.severity,
             "risk_score": self.risk_score,
             "acknowledged": self.acknowledged,

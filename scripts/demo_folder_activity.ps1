@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$TargetPath,
+    [string]$PolicyPath,
     [ValidateSet('guided', 'random', 'create-modify', 'delete-burst', 'mixed-burst')]
     [string]$Scenario = 'guided',
     [switch]$NoPrompts
@@ -32,6 +33,12 @@ if (-not $TargetPath -and -not $NoPrompts) {
 if (-not $TargetPath) { $TargetPath = $defaultTarget }
 $TargetPath = [IO.Path]::GetFullPath($TargetPath)
 
+if (-not $PolicyPath) { $PolicyPath = Read-Setting 'MONITOR_POLICY_PATH' 'instance/monitor_policy.json' }
+if (-not [IO.Path]::IsPathRooted($PolicyPath)) {
+    $PolicyPath = Join-Path $projectRoot $PolicyPath
+}
+$PolicyPath = [IO.Path]::GetFullPath($PolicyPath)
+
 $policy = @{
     window_seconds = 30
     delete_threshold = 10
@@ -40,19 +47,21 @@ $policy = @{
     mixed_destructive_minimum = 10
     auto_quarantine = ((Read-Setting 'AUTO_QUARANTINE' 'false') -eq 'true')
 }
-$policyFile = Join-Path $projectRoot 'instance/monitor_policy.json'
-if (Test-Path -LiteralPath $policyFile) {
+$policyFile = $PolicyPath
+if (Test-Path -LiteralPath $policyFile -PathType Leaf) {
     try {
         $saved = Get-Content -LiteralPath $policyFile -Raw | ConvertFrom-Json
-        foreach ($key in $policy.Keys) {
+        foreach ($key in @($policy.Keys)) {
             if ($null -ne $saved.$key) {
                 if ($key -eq 'auto_quarantine') { $policy[$key] = [bool]$saved.$key }
                 else { $policy[$key] = [int]$saved.$key }
             }
         }
     } catch {
-        Write-Warning "Could not read saved monitor settings. Using the default limits for this demo."
+        throw "Could not read saved monitor settings from '$policyFile': $($_.Exception.Message)"
     }
+} else {
+    Write-Host "No saved monitor policy found at $policyFile; using default limits."
 }
 
 if (-not (Test-Path -LiteralPath $TargetPath -PathType Container)) {
@@ -195,6 +204,7 @@ Write-Host "Random case: $Scenario"
 Write-Host "Files/operations: $operationCount"
 Write-Host "Alert window: $($policy.window_seconds) seconds"
 Write-Host "Current limits: delete $($policy.delete_threshold), modify $($policy.modify_threshold), mixed $($policy.mixed_threshold) with $($policy.mixed_destructive_minimum) edits/deletions"
+Write-Host "Policy loaded from: $policyFile"
 if (-not $NoPrompts) {
     Read-Host 'Start the server-folder monitor in the app, then press ENTER here to run the random changes' | Out-Null
 }

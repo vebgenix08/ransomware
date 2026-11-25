@@ -152,8 +152,12 @@ class MonitoringService:
         self.target_path = Path(app.config.get("MONITOR_TARGET_PATH", Path(app.instance_path) / "monitor_target"))
         self.target_path.mkdir(parents=True, exist_ok=True)
         configured_policy_path = app.config.get("MONITOR_POLICY_PATH")
+        if configured_policy_path:
+            configured_policy_path = Path(configured_policy_path)
+            if not configured_policy_path.is_absolute():
+                configured_policy_path = Path(app.root_path).parent / configured_policy_path
         self.policy_path = (
-            Path(configured_policy_path) if configured_policy_path
+            configured_policy_path if configured_policy_path
             else (None if app.testing else Path(app.instance_path) / "monitor_policy.json")
         )
         self.policy["auto_quarantine"] = bool(app.config.get("AUTO_QUARANTINE", False))
@@ -386,7 +390,7 @@ class MonitoringService:
         window_touched = window_created | window_modified | window_deleted
         window_total = len(window_touched)
         window_destructive = len(window_modified | window_deleted)
-        # This explainable activity score is not a probability or a malware
+        # This explainable activity score is not a probability or a threat
         # classification. Live alerts use only the explicit burst rules below.
         risk_score = min(100, round(100 * max(
             len(window_deleted) / policy["delete_threshold"],
@@ -446,7 +450,7 @@ class MonitoringService:
                     f"{policy['window_seconds']} seconds ({len(window_created)} created, "
                     f"{len(window_modified)} modified, {len(window_deleted)} deleted). "
                     "This alert reports an unusual file-change pattern. "
-                    "It does not confirm that the files contain malware. "
+                    "It does not identify the cause of the activity. "
                     "Review the affected files before taking action."
                 )
                 burst_score = max(risk_score, 60)

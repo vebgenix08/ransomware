@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.attributes import flag_modified
 
 from .extensions import db
-from .models import QuarantineItem, ResponseAction, User
+from .models import QuarantineItem, ResponseAction, User, public_alert_details
 
 
 def _quarantine_status_label(status: str) -> str:
@@ -29,6 +29,8 @@ def _quarantine_status_label(status: str) -> str:
         "manually_quarantined": "Completed manually",
         "no_files": "No eligible files",
     }
+    if not isinstance(status, str) or not status.strip():
+        return "Not available"
     return labels.get(status, status.replace("_", " ").capitalize())
 
 
@@ -69,17 +71,17 @@ def _format_alert_email(alert, result, app_name: str) -> tuple[str, str]:
             "This result describes rows in the evaluated CSV. It does not mean a monitored computer is infected.",
         ])
         if alert.details:
-            lines.append(f"Run details: {alert.details}")
+            lines.append(f"Run details: {public_alert_details(alert.details)}")
     elif model_version.startswith(("rolling-file-burst", "browser-folder-burst", "endpoint-agent-burst")):
         lines.extend([
             "Analysis type: Live monitored-folder activity",
             "A rolling file-change rule crossed its review threshold.",
             f"Activity score: {alert.risk_score}/100 (heuristic, not a probability)",
-            alert.details,
-            "File-change alerts identify unusual activity. They do not confirm that files contain malware.",
+            public_alert_details(alert.details),
+            "These alerts flag unusual file activity and do not identify its cause.",
         ])
     else:
-        lines.extend([f"Details: {alert.details}", f"Model or rule: {model_version or 'Not specified'}"])
+        lines.extend([f"Details: {public_alert_details(alert.details)}", f"Model or rule: {model_version or 'Not specified'}"])
 
     affected = trace.get("affected_files") or []
     if affected:
@@ -125,7 +127,7 @@ def _format_alert_email_html(alert, result, app_name: str) -> str:
             ("Dataset", trace.get("dataset_name") or model_version),
             ("Source", trace.get("dataset_source") or "Not specified"),
             ("Highest record score", f"{alert.risk_score}/100"),
-            ("Details", alert.details or "Not specified"),
+            ("Details", public_alert_details(alert.details) or "Not specified"),
         ])
         note = "This report describes records in the evaluated CSV. It does not indicate that a monitored computer is infected."
     elif model_version.startswith(("rolling-file-burst", "browser-folder-burst", "endpoint-agent-burst")):
@@ -133,15 +135,15 @@ def _format_alert_email_html(alert, result, app_name: str) -> str:
             ("Analysis type", "Live monitored-folder activity"),
             ("Activity score", f"{alert.risk_score}/100 (heuristic, not a probability)"),
             ("Detection rule", model_version),
-            ("Observed activity", alert.details or "Not specified"),
+            ("Observed activity", public_alert_details(alert.details) or "Not specified"),
         ])
-        note = "File-change alerts identify unusual activity. They do not confirm that files contain malware."
+        note = "These alerts flag unusual file activity and do not identify its cause."
     else:
         rows.extend([
             ("Analysis type", "Activity alert"),
             ("Model or rule", model_version),
             ("Score", f"{alert.risk_score}/100"),
-            ("Details", alert.details or "Not specified"),
+            ("Details", public_alert_details(alert.details) or "Not specified"),
         ])
         note = "Review this alert in the RansomShield dashboard."
     affected = trace.get("affected_files") or []
@@ -376,7 +378,7 @@ def quarantine_alert_file(app, alert, monitored_root: Path, relative_name: str) 
     """Manually move one alert-listed server-folder file into quarantine.
 
     This is deliberately separate from the automatic response path: the live
-    burst rule is not a malware verdict, so a person must select each file.
+    burst rule does not determine why files changed, so a person must select each file.
     Browser-folder alerts are metadata-only and are not eligible.
     """
     if alert.model_version != "rolling-file-burst-v1":

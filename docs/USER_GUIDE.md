@@ -99,7 +99,7 @@ If you are new to Firebase, follow the [click-by-click Firebase setup guide](FIR
 
 ## Quarantine policy
 
-Automatic quarantine is off until enabled in **Monitor files**. A live alert is an activity warning, not proof of malware. In automatic mode, RansomShield moves changed files that still exist from `MONITOR_TARGET_PATH` to the separate `instance/quarantine/` folder and records a SHA-256 hash. Manual per-file quarantine remains available from server-folder alerts. Browser-selected folder quarantine runs locally in the browser after read/write permission: a verified copy is placed in `RansomShield Quarantine` inside the selected folder before the original is removed. Use **Restore file** in the Monitor files page to return it if its hash matches and the original path is clear. Browser-selected quarantine is manual; dataset alerts never move files. The saved monitor policy is stored locally in `instance/monitor_policy.json`.
+Automatic quarantine is off until enabled in **Monitor files**. A live alert is an activity warning that requires review. In automatic mode, RansomShield moves changed files that still exist from `MONITOR_TARGET_PATH` to the separate `instance/quarantine/` folder and records a SHA-256 hash. Manual per-file quarantine remains available from server-folder alerts. Browser-selected folder quarantine runs locally in the browser after read/write permission: a verified copy is placed in `RansomShield Quarantine` inside the selected folder before the original is removed. Use **Restore file** in the Monitor files page to return it if its hash matches and the original path is clear. Browser-selected quarantine is manual; dataset alerts never move files. The saved monitor policy is stored locally in `instance/monitor_policy.json`; the PowerShell demo reads the same saved thresholds and automatic-quarantine setting.
 
 ## Install as a PWA
 
@@ -141,4 +141,4 @@ The Windows endpoint agent has its own small dependency file at `scripts/require
 
 ## Known limits
 
-This is a research prototype. Live alerts are conservative rolling file-change rules and can still produce false positives or miss activity. Filesystem monitoring does not provide process attribution or content-based encryption confirmation. No live endpoint malware tests or physical laptop transfer have been verified. Do not rely on it to protect production data or replace endpoint security software.
+This is a research prototype. Live alerts are conservative rolling file-change rules and can still produce false positives or miss activity. Filesystem monitoring does not provide process attribution or content-based encryption confirmation. No live endpoint tests or physical laptop transfer have been verified. Do not rely on it to protect production data or replace endpoint security software.

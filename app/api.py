@@ -353,7 +353,7 @@ def evaluate_browser_folder_window(folder_id: str, folder_name: str, user_id: in
         (f"Browser folder {folder_name} reported {total} distinct file changes in {window_seconds} seconds "
          f"({len(created)} created, {len(modified)} modified, {len(deleted)} deleted). "
          "This alert reports an unusual file-change pattern. "
-         "It does not confirm that the files contain malware. "
+         "It does not identify the cause of the activity. "
          "Review the affected files before taking action."),
         "high" if severe else "medium", max(risk, 60), created | modified | deleted,
         model_version="browser-folder-burst-v1", owner_id=user_id,
@@ -416,7 +416,7 @@ def evaluate_agent_window(agent: str, user_id: int) -> bool:
         (f"Agent {agent} reported {total} distinct file changes in {window_seconds} seconds "
          f"({len(created)} created, {len(modified)} modified, {len(deleted)} deleted). "
          "This alert reports an unusual file-change pattern. "
-         "It does not confirm that the files contain malware. "
+         "It does not identify the cause of the activity. "
          "Review the affected files before taking action."),
         "high" if severe else "medium", max(risk, 60), created | modified | deleted,
         model_version="endpoint-agent-burst-v1",
@@ -897,7 +897,7 @@ def incident_report(alert_id):
     if run:
         return run_report(run.id)
     return csv_download([["alert_id", "timestamp", "risk_score", "model_prediction", "observed_file_activity", "quarantine_results", "notification_status"],
-                         [alert.id, alert.to_dict()["created_at"], alert.risk_score, "suspicious", alert.details,
+                         [alert.id, alert.to_dict()["created_at"], alert.risk_score, "suspicious", alert.to_dict()["details"],
                           json.dumps(alert.to_dict()["response"]), json.dumps((alert.to_dict()["response"] or {}).get("notifications", {}))]], f"incident-{alert.id}.csv")
 
 

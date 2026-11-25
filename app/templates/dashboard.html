@@ -93,7 +93,7 @@
                 <article class="status-card">
                     <div class="d-flex justify-content-between"><span class="status-icon"><i class="bi bi-bell"></i></span><span class="state-badge" :class="alertCount ? '' : 'running'" x-text="alertCount ? 'Review' : 'Clear'"></span></div>
                     <div class="metric-value mt-4"><span x-text="status.last_risk_score"></span><small class="fs-6">/100</small></div><span class="muted small">Server-folder activity score</span>
-                    <div class="small muted mt-1">Rule-based indicator, not a malware probability</div>
+                    <div class="small muted mt-1">Rule-based activity score; not a probability</div>
                     <div class="small muted mt-2"><span x-text="status.monitored_files || 0"></span> files in the server folder</div>
                 </article>
             </div>

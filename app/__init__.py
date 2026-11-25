@@ -90,6 +90,7 @@ def create_app(test_config: Optional[dict] = None) -> Flask:
         QUARANTINE_MODE=os.environ.get("QUARANTINE_MODE", "dry-run").lower(),
         QUARANTINE_PATH=str(Path(app.instance_path) / "quarantine"),
         MONITOR_TARGET_PATH=os.environ.get("MONITOR_TARGET_PATH", str(Path(app.instance_path) / "monitor_target")),
+        MONITOR_POLICY_PATH=os.environ.get("MONITOR_POLICY_PATH", "").strip() or None,
         RESPONSE_WEBHOOK_URL=os.environ.get("RESPONSE_WEBHOOK_URL", ""),
         RESPONSE_EMAIL_TO=os.environ.get("RESPONSE_EMAIL_TO", ""),
         RESPONSE_EMAIL_FROM=os.environ.get("RESPONSE_EMAIL_FROM", ""),

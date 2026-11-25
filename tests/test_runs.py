@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -370,6 +371,30 @@ class RunTests(unittest.TestCase):
         self.assertEqual(status['live_policy']['alert_thresholds']['modified_files'], 11)
         self.assertTrue(status['live_policy']['automatic_quarantine'])
         self.assertTrue(self.app.config['AUTO_QUARANTINE'])
+
+    def test_monitor_policy_can_load_from_configured_path(self):
+        policy_path = self.root / 'configured-monitor-policy.json'
+        policy_path.write_text(json.dumps({
+            'window_seconds': 42,
+            'delete_threshold': 6,
+            'modify_threshold': 8,
+            'mixed_threshold': 14,
+            'mixed_destructive_minimum': 4,
+            'auto_quarantine': True,
+        }), encoding='utf-8')
+        app = create_app({
+            'TESTING': True,
+            'SQLALCHEMY_DATABASE_URI': 'sqlite://',
+            'MONITOR_POLICY_PATH': str(policy_path),
+            'MONITOR_TARGET_PATH': self.root / 'configured-policy-target',
+            'QUARANTINE_PATH': self.root / 'configured-policy-quarantine',
+        })
+        monitor = app.extensions['monitoring_service']
+        self.assertEqual(monitor.policy_path, policy_path)
+        self.assertEqual(monitor.policy['delete_threshold'], 6)
+        self.assertEqual(monitor.policy['modify_threshold'], 8)
+        self.assertTrue(monitor.policy['auto_quarantine'])
+        self.assertTrue(app.config['AUTO_QUARANTINE'])
 
     def test_monitor_policy_rejects_bad_limits_and_changes_while_running(self):
         invalid = self.client.post('/api/monitor/policy', json={
