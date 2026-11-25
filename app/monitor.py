@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import psutil
 
+from .burst_rules import burst_details, evaluate_burst
 from .extensions import db
 from .models import Alert, MonitoringEvent
 
@@ -136,6 +137,10 @@ class MonitoringService:
             "last_activity": {},
         }
         self.policy_path: Optional[Path] = None
+        self.path_settings_path: Optional[Path] = None
+        self.runtime_settings_path: Optional[Path] = None
+        self.path_environment_value = ""
+        self.allowed_roots = []
         self.policy = {
             "window_seconds": int(ACTIVITY_WINDOW_SECONDS),
             "delete_threshold": DELETE_ALERT_THRESHOLD,
@@ -143,14 +148,65 @@ class MonitoringService:
             "mixed_threshold": MIXED_ALERT_THRESHOLD,
             "mixed_destructive_minimum": MIN_DESTRUCTIVE_CHANGES,
             "auto_quarantine": False,
+            "auto_quarantine_max_files": 20,
+            "auto_quarantine_max_file_mb": 50,
+            "auto_quarantine_excluded_extensions": [],
+            "auto_quarantine_excluded_paths": [],
         }
 
     def init_app(self, app) -> None:
         self.app = app
         self.interval_seconds = float(app.config.get("MONITOR_INTERVAL_SECONDS", 2.0))
         self.reconcile_seconds = float(app.config.get("MONITOR_RECONCILE_SECONDS", RECONCILE_SECONDS))
-        self.target_path = Path(app.config.get("MONITOR_TARGET_PATH", Path(app.instance_path) / "monitor_target"))
+        project_root = Path(app.root_path).parent.resolve()
+        configured_target = Path(app.config.get("MONITOR_TARGET_PATH", Path(app.instance_path) / "monitor_target"))
+        if not configured_target.is_absolute():
+            configured_target = project_root / configured_target
+        configured_target = configured_target.resolve()
+        self.path_environment_value = str(configured_target)
+        configured_dotenv_target = Path(app.config.get("MONITOR_ENV_TARGET_PATH") or configured_target)
+        if not configured_dotenv_target.is_absolute():
+            configured_dotenv_target = project_root / configured_dotenv_target
+        self.dotenv_target_value = str(configured_dotenv_target.resolve())
+        configured_roots = app.config.get("MONITOR_ALLOWED_ROOTS")
+        if isinstance(configured_roots, str):
+            configured_roots = [value.strip() for value in configured_roots.split(os.pathsep) if value.strip()]
+        if configured_roots:
+            roots = [Path(value) for value in configured_roots]
+            self.allowed_roots = [(root if root.is_absolute() else project_root / root).resolve() for root in roots]
+        else:
+            default_root = configured_target.parent
+            # A volume root is too broad as an implicit allowlist.
+            if default_root == Path(default_root.anchor):
+                default_root = configured_target
+            self.allowed_roots = [default_root]
+        configured_path_settings = app.config.get("MONITOR_PATH_SETTINGS_PATH")
+        self.path_settings_path = (Path(configured_path_settings) if configured_path_settings else
+                                   None if app.testing else Path(app.instance_path) / "monitor_target.json")
+        if self.path_settings_path and not self.path_settings_path.is_absolute():
+            self.path_settings_path = project_root / self.path_settings_path
+        configured_runtime_settings = app.config.get("MONITOR_RUNTIME_SETTINGS_PATH")
+        self.runtime_settings_path = (
+            Path(configured_runtime_settings) if configured_runtime_settings
+            else (None if app.testing else Path(app.instance_path) / "monitor_runtime.json")
+        )
+        if self.runtime_settings_path and not self.runtime_settings_path.is_absolute():
+            self.runtime_settings_path = project_root / self.runtime_settings_path
+        self.target_path = configured_target
         self.target_path.mkdir(parents=True, exist_ok=True)
+        if self.path_settings_path and self.path_settings_path.exists():
+            try:
+                saved_target = json.loads(self.path_settings_path.read_text(encoding="utf-8"))
+                saved_origin = str(saved_target.get("environment_target", ""))
+                saved_dotenv_origin = str(saved_target.get("dotenv_target", saved_origin))
+                selected = Path(saved_target.get("target_path", ""))
+                if (saved_origin and os.path.normcase(saved_origin) == os.path.normcase(self.path_environment_value)
+                        and os.path.normcase(saved_dotenv_origin) == os.path.normcase(self.dotenv_target_value)
+                        and selected.is_dir()):
+                    self.target_path = self.validate_target_path(selected)
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                pass
+        app.config["MONITOR_TARGET_PATH"] = str(self.target_path)
         configured_policy_path = app.config.get("MONITOR_POLICY_PATH")
         if configured_policy_path:
             configured_policy_path = Path(configured_policy_path)
@@ -168,17 +224,47 @@ class MonitoringService:
                 self.policy = self.validate_policy({**self.policy, **saved_policy})
             except (OSError, ValueError, TypeError, json.JSONDecodeError):
                 pass
-        self._apply_policy_to_app(enable_real_quarantine=bool(saved_policy and self.policy["auto_quarantine"]))
+        activate_real_quarantine = bool(
+            self.policy["auto_quarantine"]
+            and app.config.get("QUARANTINE_MODE") != "dry-run"
+        )
+        if activate_real_quarantine:
+            try:
+                self._validate_quarantine_ready()
+            except (OSError, ValueError) as exc:
+                app.config["QUARANTINE_MODE"] = "dry-run"
+                app.logger.error("Automatic quarantine remains in dry-run: %s", exc)
+                activate_real_quarantine = False
+        self._apply_policy_to_app(enable_real_quarantine=activate_real_quarantine)
         app.extensions["monitoring_service"] = self
+        self._write_runtime_settings()
 
-    @staticmethod
-    def validate_policy(value: dict) -> dict:
+    def _write_runtime_settings(self) -> None:
+        """Publish the effective server monitor config for the local demo launcher."""
+        if not self.runtime_settings_path:
+            return
+        payload = {
+            "target_path": str(self.target_path),
+            "policy_path": str(self.policy_path) if self.policy_path else "",
+            "policy": dict(self.policy),
+            "auto_quarantine": bool(self.app.config.get("AUTO_QUARANTINE", False)),
+            "quarantine_mode": self.app.config.get("QUARANTINE_MODE", "dry-run"),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self.runtime_settings_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.runtime_settings_path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        os.replace(temporary, self.runtime_settings_path)
+
+    def validate_policy(self, value: dict) -> dict:
         """Validate the user-editable server monitor policy."""
         if not isinstance(value, dict):
             raise ValueError("Monitoring settings must be an object.")
 
+        defaults = self.policy
+
         def bounded_int(name, minimum, maximum):
-            raw = value.get(name)
+            raw = value.get(name, defaults[name])
             if isinstance(raw, bool) or not isinstance(raw, int) or not minimum <= raw <= maximum:
                 raise ValueError(f"{name.replace('_', ' ').title()} must be between {minimum} and {maximum}.")
             return raw
@@ -190,12 +276,117 @@ class MonitoringService:
             "mixed_threshold": bounded_int("mixed_threshold", 1, 5000),
             "mixed_destructive_minimum": bounded_int("mixed_destructive_minimum", 1, 5000),
             "auto_quarantine": value.get("auto_quarantine"),
+            "auto_quarantine_max_files": bounded_int("auto_quarantine_max_files", 1, 100),
+            "auto_quarantine_max_file_mb": bounded_int("auto_quarantine_max_file_mb", 1, 500),
+            "auto_quarantine_excluded_extensions": value.get("auto_quarantine_excluded_extensions", defaults["auto_quarantine_excluded_extensions"]),
+            "auto_quarantine_excluded_paths": value.get("auto_quarantine_excluded_paths", defaults["auto_quarantine_excluded_paths"]),
         }
         if not isinstance(policy["auto_quarantine"], bool):
             raise ValueError("Automatic quarantine must be on or off.")
         if policy["mixed_destructive_minimum"] > policy["mixed_threshold"]:
             raise ValueError("The mixed-change minimum cannot exceed the total-change limit.")
+        for name in ("auto_quarantine_excluded_extensions", "auto_quarantine_excluded_paths"):
+            raw_values = policy[name]
+            if not isinstance(raw_values, list) or len(raw_values) > 100:
+                raise ValueError(f"{name.replace('_', ' ').title()} must be a list with at most 100 entries.")
+            cleaned = []
+            for raw in raw_values:
+                if not isinstance(raw, str) or len(raw.strip()) > 240:
+                    raise ValueError(f"Invalid entry in {name.replace('_', ' ')}.")
+                entry = raw.strip().replace("\\", "/")
+                if not entry:
+                    continue
+                if name.endswith("extensions"):
+                    entry = entry.lower()
+                    if not entry.startswith(".") or "/" in entry or entry in {".", ".."}:
+                        raise ValueError("Excluded extensions must look like .tmp or .bak.")
+                elif entry.startswith("/") or any(part in {".", ".."} for part in entry.split("/")):
+                    raise ValueError("Excluded paths must be safe relative folder paths.")
+                cleaned.append(entry.rstrip("/") if name.endswith("paths") else entry)
+            policy[name] = sorted(set(cleaned))
         return policy
+
+    def validate_target_path(self, value) -> Path:
+        candidate = Path(value).expanduser().resolve(strict=True)
+        if not candidate.is_dir():
+            raise ValueError("Choose an existing folder on the monitoring server.")
+        if candidate == Path(candidate.anchor) or candidate == Path(self.app.root_path).parent.resolve():
+            raise ValueError("Choose a data folder, not a drive root or the application folder.")
+        exact_configured_targets = {os.path.normcase(self.path_environment_value),
+                                    os.path.normcase(self.dotenv_target_value)}
+        is_configured_default = os.path.normcase(str(candidate)) in exact_configured_targets
+        if not is_configured_default and not any(candidate != root and root in candidate.parents for root in self.allowed_roots):
+            roots = ", ".join(str(root) for root in self.allowed_roots)
+            raise ValueError(f"Folder must be inside an allowed monitoring location: {roots}")
+        quarantine = Path(self.app.config["QUARANTINE_PATH"]).expanduser().resolve()
+        if candidate == quarantine or candidate in quarantine.parents or quarantine in candidate.parents:
+            raise ValueError("The monitored folder and quarantine folder must be separate.")
+        if not os.access(candidate, os.R_OK):
+            raise ValueError("The application cannot read this folder.")
+        return candidate
+
+    def set_target_path(self, value) -> Path:
+        if self.is_running:
+            raise RuntimeError("Stop monitoring before changing the server folder.")
+        candidate = self.validate_target_path(value)
+        if self.policy["auto_quarantine"] and self.app.config.get("QUARANTINE_MODE") != "dry-run":
+            self._validate_quarantine_ready(candidate)
+        if self.path_settings_path:
+            self.path_settings_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {"target_path": str(candidate), "environment_target": self.path_environment_value,
+                       "dotenv_target": self.dotenv_target_value}
+            temporary = self.path_settings_path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            os.replace(temporary, self.path_settings_path)
+        self.target_path = candidate
+        self.app.config["MONITOR_TARGET_PATH"] = str(candidate)
+        self._write_runtime_settings()
+        return candidate
+
+    def reset_target_path(self) -> Path:
+        if self.is_running:
+            raise RuntimeError("Stop monitoring before changing the server folder.")
+        target = self.validate_target_path(self.dotenv_target_value)
+        if self.policy["auto_quarantine"] and self.app.config.get("QUARANTINE_MODE") != "dry-run":
+            self._validate_quarantine_ready(target)
+        if self.path_settings_path:
+            if os.path.normcase(str(target)) == os.path.normcase(self.path_environment_value):
+                if self.path_settings_path.exists():
+                    self.path_settings_path.unlink()
+            else:
+                self.path_settings_path.parent.mkdir(parents=True, exist_ok=True)
+                payload = {"target_path": str(target), "environment_target": self.path_environment_value,
+                           "dotenv_target": self.dotenv_target_value}
+                temporary = self.path_settings_path.with_suffix(".tmp")
+                temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+                os.replace(temporary, self.path_settings_path)
+        self.target_path = target
+        self.app.config["MONITOR_TARGET_PATH"] = str(target)
+        self._write_runtime_settings()
+        return target
+
+    def _validate_quarantine_ready(self, monitored_root=None) -> None:
+        """Fail closed before enabling real file moves if paths are unsafe or incompatible."""
+        root = Path(monitored_root or self.target_path).resolve(strict=True)
+        quarantine_setting = Path(self.app.config["QUARANTINE_PATH"]).expanduser()
+        for part in (quarantine_setting, *quarantine_setting.parents):
+            if not part.exists():
+                continue
+            info = part.lstat()
+            if part.is_symlink() or getattr(info, "st_file_attributes", 0) & 0x400:
+                raise ValueError("Quarantine folders cannot contain links or reparse points.")
+        quarantine = quarantine_setting.resolve()
+        if quarantine == root or root in quarantine.parents or quarantine in root.parents:
+            raise ValueError("The monitored folder and quarantine folder must be separate.")
+        if not root.is_dir() or not os.access(root, os.W_OK):
+            raise ValueError("The monitored folder must be writable before automatic quarantine can be enabled.")
+        probe = quarantine
+        while not probe.exists() and probe != probe.parent:
+            probe = probe.parent
+        if not probe.is_dir() or not os.access(probe, os.W_OK):
+            raise ValueError("The quarantine location must be writable before automatic quarantine can be enabled.")
+        if root.stat().st_dev != probe.stat().st_dev:
+            raise ValueError("The quarantine location must be on the same filesystem as the monitored folder.")
 
     def _apply_policy_to_app(self, enable_real_quarantine: bool = False) -> None:
         if not self.app:
@@ -210,6 +401,8 @@ class MonitoringService:
         policy = self.validate_policy(values)
         if self.is_running:
             raise RuntimeError("Stop the server monitor before changing these settings.")
+        if policy["auto_quarantine"]:
+            self._validate_quarantine_ready()
         self.policy = policy
         self._apply_policy_to_app(enable_real_quarantine=policy["auto_quarantine"])
         if self.policy_path:
@@ -217,6 +410,7 @@ class MonitoringService:
             temporary = self.policy_path.with_suffix(".tmp")
             temporary.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
             os.replace(temporary, self.policy_path)
+        self._write_runtime_settings()
         return dict(policy)
 
     @property
@@ -283,7 +477,10 @@ class MonitoringService:
             "interval_seconds": self.interval_seconds,
             "reconcile_seconds": self.reconcile_seconds,
             "auto_quarantine": self.app.config["AUTO_QUARANTINE"],
+            "quarantine_mode": ("off" if not self.app.config["AUTO_QUARANTINE"] else
+                                "dry-run" if self.app.config.get("QUARANTINE_MODE") == "dry-run" else "active"),
             "policy": dict(self.policy),
+            "allowed_roots": [str(root) for root in self.allowed_roots],
             **metrics,
         }
 
@@ -389,20 +586,10 @@ class MonitoringService:
         window_deleted = set().union(*(item[3] for item in self._activity_window)) if self._activity_window else set()
         window_touched = window_created | window_modified | window_deleted
         window_total = len(window_touched)
-        window_destructive = len(window_modified | window_deleted)
-        # This explainable activity score is not a probability or a threat
-        # classification. Live alerts use only the explicit burst rules below.
-        risk_score = min(100, round(100 * max(
-            len(window_deleted) / policy["delete_threshold"],
-            len(window_modified) / policy["modify_threshold"],
-            window_total / policy["mixed_threshold"],
-        )))
-        burst_detected = (
-            len(window_deleted) >= policy["delete_threshold"]
-            or len(window_modified) >= policy["modify_threshold"]
-            or (window_total >= policy["mixed_threshold"]
-                and window_destructive >= policy["mixed_destructive_minimum"])
-        )
+        window_evaluation = evaluate_burst({"created": window_created, "modified": window_modified,
+                                            "deleted": window_deleted}, policy)
+        risk_score = window_evaluation["score"]
+        burst_detected = window_evaluation["triggered"]
         now = datetime.now(timezone.utc).isoformat()
 
         with self._lock:
@@ -445,21 +632,14 @@ class MonitoringService:
 
             if burst_detected and now_monotonic - self._last_burst_alert_at >= ALERT_COOLDOWN_SECONDS:
                 self._last_burst_alert_at = now_monotonic
-                burst_details = (
-                    f"High-volume file-change burst across {window_total} distinct files in "
-                    f"{policy['window_seconds']} seconds ({len(window_created)} created, "
-                    f"{len(window_modified)} modified, {len(window_deleted)} deleted). "
-                    "This alert reports an unusual file-change pattern. "
+                burst_text = burst_details(window_evaluation, "High-volume file-change burst")
+                burst_details_text = (
+                    f"{burst_text} This alert reports an unusual file-change pattern. "
                     "It does not identify the cause of the activity. "
                     "Review the affected files before taking action."
                 )
                 burst_score = max(risk_score, 60)
-                severe_burst = (
-                    len(window_deleted) >= 2 * policy["delete_threshold"]
-                    or len(window_modified) >= 2 * policy["modify_threshold"]
-                    or (window_total >= 2 * policy["mixed_threshold"]
-                        and window_destructive >= 2 * policy["mixed_destructive_minimum"])
-                )
+                severe_burst = window_evaluation["severe"]
                 alert_files = [
                     {
                         "path": path,
@@ -481,12 +661,13 @@ class MonitoringService:
                 }
                 self._persist_alert(
                     "High-volume file-change burst",
-                    burst_details,
+                    burst_details_text,
                     "high" if severe_burst else "medium",
                     burst_score,
                     window_touched,
                     file_activity=alert_files,
                     quarantine_candidates=quarantine_candidates,
+                    extra_rule_trace=[{"signal": "rule_evaluation", "value": window_evaluation}],
                 )
 
     def _persist_event(        self,

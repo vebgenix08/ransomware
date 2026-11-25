@@ -13,6 +13,7 @@ from sqlalchemy import or_
 from werkzeug.datastructures import FileStorage
 
 from .extensions import csrf, db
+from .burst_rules import burst_details, evaluate_burst, synthetic_validation
 from .models import (Alert, MonitoringEvent, AnalysisRun, QuarantineItem, User, AuditLog,
                      AgentDevice, AgentCommand, utc_isoformat)
 from .audit import record_audit
@@ -330,32 +331,20 @@ def evaluate_browser_folder_window(folder_id: str, folder_name: str, user_id: in
         operation = event.event_type.removeprefix("file_")
         if operation in paths:
             paths[operation].add(event.details.removeprefix(f"{prefix}{operation} "))
-    created, modified, deleted = (paths[key] for key in ("created", "modified", "deleted"))
-    total = len(created | modified | deleted)
-    destructive = len(modified | deleted)
-    if not (len(deleted) >= policy["delete_threshold"]
-            or len(modified) >= policy["modify_threshold"]
-            or (total >= policy["mixed_threshold"]
-                and destructive >= policy["mixed_destructive_minimum"])):
+    evaluation = evaluate_burst(paths, policy)
+    if not evaluation["triggered"]:
         return False
     if Alert.query.filter_by(user_id=user_id, model_version="browser-folder-burst-v1").filter(
             Alert.created_at >= now - timedelta(seconds=60)).first():
         return False
-    risk = min(100, round(100 * max(len(deleted) / policy["delete_threshold"],
-                                   len(modified) / policy["modify_threshold"],
-                                   total / policy["mixed_threshold"])))
-    severe = (len(deleted) >= 2 * policy["delete_threshold"]
-              or len(modified) >= 2 * policy["modify_threshold"]
-              or (total >= 2 * policy["mixed_threshold"]
-                  and destructive >= 2 * policy["mixed_destructive_minimum"]))
+    created, modified, deleted = (paths[key] for key in ("created", "modified", "deleted"))
     current_app.extensions["monitoring_service"]._persist_alert(
         "Browser folder file-change burst",
-        (f"Browser folder {folder_name} reported {total} distinct file changes in {window_seconds} seconds "
-         f"({len(created)} created, {len(modified)} modified, {len(deleted)} deleted). "
+        (f"{burst_details(evaluation, f'Browser folder {folder_name}')} "
          "This alert reports an unusual file-change pattern. "
          "It does not identify the cause of the activity. "
          "Review the affected files before taking action."),
-        "high" if severe else "medium", max(risk, 60), created | modified | deleted,
+        "high" if evaluation["severe"] else "medium", max(evaluation["score"], 60), created | modified | deleted,
         model_version="browser-folder-burst-v1", owner_id=user_id,
         file_activity=[
             {"path": path, "operations": [operation for operation, paths_for_operation in paths.items()
@@ -363,7 +352,8 @@ def evaluate_browser_folder_window(folder_id: str, folder_name: str, user_id: in
             for path in sorted(created | modified | deleted)
         ],
         extra_rule_trace=[{"signal": "selected_folder_id", "value": folder_id},
-                          {"signal": "selected_folder_name", "value": folder_name}],
+                          {"signal": "selected_folder_name", "value": folder_name},
+                          {"signal": "rule_evaluation", "value": evaluation}],
     )
     return True
 
@@ -389,36 +379,23 @@ def evaluate_agent_window(agent: str, user_id: int) -> bool:
             operation_prefix = f"{agent_prefix}{operation} "
             if event.details.startswith(operation_prefix):
                 paths[operation].add(event.details.removeprefix(operation_prefix))
-    created, modified, deleted = (paths[key] for key in ("created", "modified", "deleted"))
-    total = len(created | modified | deleted)
-    destructive = len(modified | deleted)
-    burst = (len(deleted) >= policy["delete_threshold"]
-             or len(modified) >= policy["modify_threshold"]
-             or (total >= policy["mixed_threshold"]
-                 and destructive >= policy["mixed_destructive_minimum"]))
-    if not burst:
+    evaluation = evaluate_burst(paths, policy)
+    if not evaluation["triggered"]:
         return False
     last_alert = Alert.query.filter_by(user_id=user_id, model_version="endpoint-agent-burst-v1").filter(
         Alert.created_at >= now - timedelta(seconds=60)
     ).first()
     if last_alert:
         return False
-    risk = min(100, round(100 * max(len(deleted) / policy["delete_threshold"],
-                                   len(modified) / policy["modify_threshold"],
-                                   total / policy["mixed_threshold"])))
-    severe = (len(deleted) >= 2 * policy["delete_threshold"]
-              or len(modified) >= 2 * policy["modify_threshold"]
-              or (total >= 2 * policy["mixed_threshold"]
-                  and destructive >= 2 * policy["mixed_destructive_minimum"]))
+    created, modified, deleted = (paths[key] for key in ("created", "modified", "deleted"))
     monitor = current_app.extensions["monitoring_service"]
     monitor._persist_alert(
         "Remote endpoint file-change burst",
-        (f"Agent {agent} reported {total} distinct file changes in {window_seconds} seconds "
-         f"({len(created)} created, {len(modified)} modified, {len(deleted)} deleted). "
+        (f"{burst_details(evaluation, f'Agent {agent} reported')} "
          "This alert reports an unusual file-change pattern. "
          "It does not identify the cause of the activity. "
          "Review the affected files before taking action."),
-        "high" if severe else "medium", max(risk, 60), created | modified | deleted,
+        "high" if evaluation["severe"] else "medium", max(evaluation["score"], 60), created | modified | deleted,
         model_version="endpoint-agent-burst-v1",
         owner_id=user_id,
         file_activity=[
@@ -426,6 +403,7 @@ def evaluate_agent_window(agent: str, user_id: int) -> bool:
                                            if path in paths_for_operation]}
             for path in sorted(created | modified | deleted)
         ],
+        extra_rule_trace=[{"signal": "rule_evaluation", "value": evaluation}],
     )
     return True
 
@@ -521,10 +499,12 @@ def monitor_status():
     public_model = json.loads(public_model_path.read_text(encoding="utf-8")) if public_model_path.exists() else {}
     telemetry_model = json.loads(telemetry_model_path.read_text(encoding="utf-8")) if telemetry_model_path.exists() else {}
     status = monitor.status()
+    status["settings_locked"] = monitor.is_running and not monitor.owned_by(current_user.id)
     if monitor.is_running and not monitor.owned_by(current_user.id):
         status = {
             "running": False,
             "connection_state": "In use by another account" if monitor.is_running else "Stopped",
+            "settings_locked": True,
             "model_state": "Rolling burst rules",
             "target": "Not assigned to this account", "interval_seconds": status["interval_seconds"],
             "policy": status["policy"],
@@ -550,7 +530,7 @@ def monitor_status():
                     "mixed_changes": status["policy"]["mixed_threshold"],
                     "mixed_change_minimum_modified_or_deleted": status["policy"]["mixed_destructive_minimum"],
                 },
-                "score_type": "heuristic activity score; not a probability",
+                "score_type": "heuristic burst intensity; not a probability",
                 "automatic_quarantine": status["policy"]["auto_quarantine"],
             },
             "published_model": {key: public_model.get(key) for key in ("display_name", "trained_at", "training", "metrics", "limitations")},
@@ -676,11 +656,30 @@ def update_monitor_policy():
         policy = monitor.update_policy(body)
     except RuntimeError as exc:
         return jsonify(ok=False, message=str(exc)), 409
-    except (TypeError, ValueError) as exc:
+    except (OSError, TypeError, ValueError) as exc:
         return jsonify(ok=False, message=str(exc)), 422
     record_audit("monitor_policy_updated", policy=policy)
     db.session.commit()
     return jsonify(ok=True, message="Server monitor settings saved.", policy=policy)
+
+
+@api.post("/monitor/path")
+@login_required
+def update_monitor_path():
+    monitor = get_monitor()
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify(ok=False, message="Provide a server folder path."), 400
+    try:
+        target = monitor.reset_target_path() if body.get("reset") is True else monitor.set_target_path(body.get("target_path", ""))
+    except RuntimeError as exc:
+        return jsonify(ok=False, message=str(exc)), 409
+    except (OSError, TypeError, ValueError) as exc:
+        return jsonify(ok=False, message=str(exc)), 422
+    record_audit("monitor_target_changed", target=str(target), reset=body.get("reset") is True)
+    db.session.commit()
+    return jsonify(ok=True, message="Server monitoring folder saved.", target=str(target),
+                   allowed_roots=[str(root) for root in monitor.allowed_roots])
 
 
 @api.post("/monitor/policy/simulate")
@@ -758,6 +757,18 @@ def simulate_monitor_policy():
                    streams=len(streams), windows_checked=windows_checked,
                    would_alert_count=candidate_count, policy=policy,
                    note="This replays saved activity only. It cannot tell false alarms from attacks because live events have no verified labels.")
+
+
+@api.post("/monitor/policy/validate-synthetic")
+@login_required
+def validate_synthetic_policy():
+    monitor = get_monitor()
+    body = request.get_json(silent=True)
+    try:
+        policy = monitor.validate_policy({**(body or {}), "auto_quarantine": monitor.policy["auto_quarantine"]})
+    except (TypeError, ValueError) as exc:
+        return jsonify(ok=False, message=str(exc)), 422
+    return jsonify(ok=True, policy=policy, validation=synthetic_validation(policy))
 
 
 @api.post("/monitor/start")
@@ -1180,9 +1191,10 @@ def retry_alert_email(alert_id: int):
         return jsonify(ok=False, message="Email retry is available only after a failed attempt."), 409
     from .response import retry_alert_email as retry_email
     sent = retry_email(current_app, alert, action)
-    record_audit("alert_email_retried", alert_id=alert.id, status="sent" if sent else "failed")
+    record_audit("alert_email_retried", alert_id=alert.id,
+                 status="accepted_by_smtp_delivery_unconfirmed" if sent else "failed")
     db.session.commit()
-    return jsonify(ok=sent, message="Email accepted by SMTP." if sent else "Email retry failed. Check SMTP configuration and server logs.",
+    return jsonify(ok=sent, message="SMTP accepted the retry; inbox delivery is unconfirmed." if sent else "Email retry failed. Check SMTP configuration and server logs.",
                    alert=alert.to_dict()), 200 if sent else 502
 
 

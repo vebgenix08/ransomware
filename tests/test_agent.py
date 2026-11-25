@@ -90,7 +90,7 @@ class EndpointAgentApiTests(unittest.TestCase):
         self.assertTrue(response.json["alert_created"])
         with self.app.app_context():
             alert = Alert.query.filter_by(model_version="endpoint-agent-burst-v1").one()
-            self.assertIn("20 distinct file changes", alert.details)
+            self.assertIn("20 distinct files", alert.details)
             self.assertEqual(alert.user_id, User.query.filter_by(email="agent-owner@example.invalid").one().id)
 
     def test_agent_rejects_events_without_a_configured_existing_account_owner(self):

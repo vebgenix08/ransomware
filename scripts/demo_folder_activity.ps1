@@ -11,6 +11,8 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 
 function Read-Setting([string]$Name, [string]$Fallback) {
+    $processValue = [Environment]::GetEnvironmentVariable($Name)
+    if ($processValue) { return $processValue.Trim().Trim('"').Trim("'") }
     $envFile = Join-Path $projectRoot '.env'
     if (Test-Path -LiteralPath $envFile) {
         $match = Select-String -LiteralPath $envFile -Pattern "^\s*$Name\s*=\s*(.*?)\s*$" | Select-Object -First 1
@@ -22,9 +24,43 @@ function Read-Setting([string]$Name, [string]$Fallback) {
     return $Fallback
 }
 
+$runtimeSettingsPath = Read-Setting 'MONITOR_RUNTIME_SETTINGS_PATH' 'instance/monitor_runtime.json'
+if (-not [IO.Path]::IsPathRooted($runtimeSettingsPath)) {
+    $runtimeSettingsPath = Join-Path $projectRoot $runtimeSettingsPath
+}
+$runtimeSettingsPath = [IO.Path]::GetFullPath($runtimeSettingsPath)
+$runtimeSettings = $null
+if (Test-Path -LiteralPath $runtimeSettingsPath -PathType Leaf) {
+    try {
+        $runtimeSettings = Get-Content -LiteralPath $runtimeSettingsPath -Raw | ConvertFrom-Json
+    } catch {
+        throw "Could not read effective app monitor settings from '$runtimeSettingsPath': $($_.Exception.Message)"
+    }
+}
+
 $defaultTarget = Read-Setting 'MONITOR_TARGET_PATH' 'instance/monitor_target'
 if (-not [IO.Path]::IsPathRooted($defaultTarget)) {
     $defaultTarget = Join-Path $projectRoot $defaultTarget
+}
+$defaultTarget = [IO.Path]::GetFullPath($defaultTarget)
+$settingsSource = 'environment and saved settings'
+if ($runtimeSettings -and $runtimeSettings.target_path) {
+    $defaultTarget = [IO.Path]::GetFullPath([string]$runtimeSettings.target_path)
+    $settingsSource = 'effective application settings'
+}
+$pathSettings = Read-Setting 'MONITOR_PATH_SETTINGS_PATH' 'instance/monitor_target.json'
+if (-not [IO.Path]::IsPathRooted($pathSettings)) { $pathSettings = Join-Path $projectRoot $pathSettings }
+$pathSettings = [IO.Path]::GetFullPath($pathSettings)
+if (-not $TargetPath -and -not ($runtimeSettings -and $runtimeSettings.target_path) -and (Test-Path -LiteralPath $pathSettings -PathType Leaf)) {
+    try {
+        $savedPath = Get-Content -LiteralPath $pathSettings -Raw | ConvertFrom-Json
+        $environmentTarget = [string]$savedPath.environment_target
+        if ($environmentTarget -and [IO.Path]::GetFullPath($environmentTarget) -ieq $defaultTarget -and $savedPath.target_path) {
+            $defaultTarget = [IO.Path]::GetFullPath([string]$savedPath.target_path)
+        }
+    } catch {
+        throw "Could not read saved monitoring folder from '$pathSettings': $($_.Exception.Message)"
+    }
 }
 if (-not $TargetPath -and -not $NoPrompts) {
     $enteredPath = Read-Host "Enter the server folder watched by RansomShield, or press ENTER for $defaultTarget"
@@ -33,6 +69,10 @@ if (-not $TargetPath -and -not $NoPrompts) {
 if (-not $TargetPath) { $TargetPath = $defaultTarget }
 $TargetPath = [IO.Path]::GetFullPath($TargetPath)
 
+if (-not $PolicyPath -and $runtimeSettings -and $runtimeSettings.policy_path) {
+    $PolicyPath = [string]$runtimeSettings.policy_path
+    $settingsSource = 'effective application settings'
+}
 if (-not $PolicyPath) { $PolicyPath = Read-Setting 'MONITOR_POLICY_PATH' 'instance/monitor_policy.json' }
 if (-not [IO.Path]::IsPathRooted($PolicyPath)) {
     $PolicyPath = Join-Path $projectRoot $PolicyPath
@@ -62,6 +102,20 @@ if (Test-Path -LiteralPath $policyFile -PathType Leaf) {
     }
 } else {
     Write-Host "No saved monitor policy found at $policyFile; using default limits."
+}
+if ($runtimeSettings -and $runtimeSettings.policy) {
+    foreach ($key in @($policy.Keys)) {
+        $value = $runtimeSettings.policy.$key
+        if ($null -ne $value) {
+            if ($key -eq 'auto_quarantine') { $policy[$key] = [bool]$value }
+            else { $policy[$key] = [int]$value }
+        }
+    }
+}
+$quarantineMode = 'off'
+if ($policy.auto_quarantine) { $quarantineMode = 'active' }
+if ($runtimeSettings -and $runtimeSettings.quarantine_mode) {
+    $quarantineMode = [string]$runtimeSettings.quarantine_mode
 }
 
 if (-not (Test-Path -LiteralPath $TargetPath -PathType Container)) {
@@ -115,7 +169,8 @@ if ($Scenario -eq 'guided') {
     Write-Host "Safe demo folder: $demoFolder"
     Write-Host "Alert window: $($policy.window_seconds) seconds"
     Write-Host "Limits: delete $($policy.delete_threshold), modify $($policy.modify_threshold), mixed $($policy.mixed_threshold), minimum modified/deleted $($policy.mixed_destructive_minimum)"
-    Write-Host 'All changes stay inside the new demo folder. Automatic quarantine may move changed demo files.'
+    Write-Host "Settings source: $settingsSource"
+    Write-Host 'All changes stay inside the new demo folder.'
     Write-Host 'Create-only and below-limit stages still appear in Recent activity but may not create alerts. Threshold stages should alert if monitoring is active and the alert cooldown has expired.'
     Write-Host "Planned steps: create $initialCount; modify $fewModifyCount; modify $moreModifyCount; create $createAgainCount; delete $deleteCount; mixed $mixedCount."
     if (-not $NoPrompts) {
@@ -163,8 +218,10 @@ if ($Scenario -eq 'guided') {
 
     Write-Host ''
     Write-Host 'Six-step walkthrough complete. Review the activity log and alerts in the app.' -ForegroundColor Green
-    if ($policy.auto_quarantine) {
+    if ($quarantineMode -eq 'active') {
         Write-Host 'Automatic quarantine is enabled. Changed files may have moved to quarantine; restore demo files from Email & history if needed.' -ForegroundColor Yellow
+    } elseif ($quarantineMode -eq 'dry-run') {
+        Write-Host 'Automatic quarantine is in dry-run mode. Files are not moved.' -ForegroundColor Yellow
     } else {
         Write-Host 'Automatic quarantine is off. You can manually quarantine an existing demo file from an alert.'
     }
@@ -205,8 +262,10 @@ Write-Host "Safe test folder: $demoFolder"
 Write-Host "Random case: $Scenario"
 Write-Host "Files/operations: $operationCount"
 Write-Host "Alert window: $($policy.window_seconds) seconds"
-Write-Host "Current limits: delete $($policy.delete_threshold), modify $($policy.modify_threshold), mixed $($policy.mixed_threshold) with $($policy.mixed_destructive_minimum) edits/deletions"
+Write-Host "Limits: delete $($policy.delete_threshold), modify $($policy.modify_threshold), mixed $($policy.mixed_threshold), minimum modified/deleted $($policy.mixed_destructive_minimum)"
+Write-Host "Settings source: $settingsSource"
 Write-Host "Policy loaded from: $policyFile"
+Write-Host "Automatic quarantine mode: $quarantineMode"
 if (-not $NoPrompts) {
     Read-Host 'Start the server-folder monitor in the app, then press ENTER here to run the random changes' | Out-Null
 }
@@ -239,8 +298,10 @@ if ($Scenario -eq 'delete-burst') {
 Write-Host ''
 Write-Host 'Random activity is complete.' -ForegroundColor Green
 Write-Host 'Review the alert and file paths in the app.'
-if ($policy.auto_quarantine -and $Scenario -ne 'delete-burst') {
+if ($quarantineMode -eq 'active' -and $Scenario -ne 'delete-burst') {
     Write-Host 'Automatic quarantine is enabled: changed files may have moved to quarantine. Restore them from Email & history if needed.' -ForegroundColor Yellow
+} elseif ($quarantineMode -eq 'dry-run') {
+    Write-Host 'Automatic quarantine is in dry-run mode. Files are not moved.' -ForegroundColor Yellow
 } elseif ($Scenario -eq 'delete-burst') {
     Write-Host 'This case deletes its own test files; deleted files no longer exist to be quarantined.' -ForegroundColor Yellow
 } else {

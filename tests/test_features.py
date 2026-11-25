@@ -11,6 +11,7 @@ from app.detector import FEATURE_NAMES
 from app.extensions import db
 from app.models import Alert, MonitoringEvent, QuarantineItem, ResponseAction, User
 from app.monitor import take_snapshot
+from app.burst_rules import evaluate_burst, synthetic_validation
 from app.response import respond, restore_quarantine
 from scripts.evaluate_external import evaluate
 
@@ -23,15 +24,172 @@ class SafeDefaultsTests(unittest.TestCase):
         self.assertFalse(app.config["AUTO_QUARANTINE"])
 
 
+class LoginRedirectTests(unittest.TestCase):
+    def test_signin_does_not_redirect_to_json_api_after_login(self):
+        app = create_app({"TESTING": True, "WTF_CSRF_ENABLED": False, "AUTH_PROVIDER": "local",
+                          "SQLALCHEMY_DATABASE_URI": "sqlite://"})
+        with app.app_context():
+            user = User(full_name="Redirect Tester", email="redirect-tester@example.com")
+            user.set_password("not-a-real-password")
+            db.session.add(user)
+            db.session.commit()
+
+        response = app.test_client().post(
+            "/auth/signin?next=%2Fapi%2Fdevices",
+            data={"email": "redirect-tester@example.com", "password": "not-a-real-password"},
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/dashboard")
+
+
+class BurstRuleTests(unittest.TestCase):
+    def setUp(self):
+        self.policy = {"window_seconds": 30, "delete_threshold": 10, "modify_threshold": 20,
+                       "mixed_threshold": 30, "mixed_destructive_minimum": 10}
+
+    def test_rule_trace_distinguishes_files_from_path_operation_types(self):
+        result = evaluate_burst({"created": {"a", "b"}, "modified": {"a", "b"}, "deleted": set()}, self.policy)
+        self.assertEqual(result["distinct_files"], 2)
+        self.assertEqual(result["distinct_file_operations"], 4)
+        self.assertFalse(result["triggered"])
+
+    def test_synthetic_validation_exposes_normal_batch_edit_false_alarm(self):
+        result = synthetic_validation(self.policy)
+        self.assertEqual(result["confusion_matrix"], {
+            "true_positive": 3, "false_positive": 1, "true_negative": 6, "false_negative": 0
+        })
+        self.assertAlmostEqual(result["false_positive_rate"], 1 / 7, places=3)
+        self.assertIn("hand-authored synthetic", result["limitations"])
+
+
+class MonitorPathSettingsTests(unittest.TestCase):
+    def test_explicit_dry_run_setting_overrides_saved_auto_quarantine_policy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "watched"
+            target.mkdir()
+            policy_path = root / "policy.json"
+            policy_path.write_text(json.dumps({
+                "window_seconds": 17,
+                "delete_threshold": 3,
+                "modify_threshold": 2,
+                "mixed_threshold": 7,
+                "mixed_destructive_minimum": 2,
+                "auto_quarantine": True,
+            }), encoding="utf-8")
+            app = create_app({
+                "TESTING": True,
+                "SQLALCHEMY_DATABASE_URI": "sqlite://",
+                "MONITOR_TARGET_PATH": target,
+                "MONITOR_POLICY_PATH": policy_path,
+                "QUARANTINE_PATH": root / "quarantine",
+                "QUARANTINE_MODE": "dry-run",
+            })
+            self.assertTrue(app.config["AUTO_QUARANTINE"])
+            self.assertEqual(app.config["QUARANTINE_MODE"], "dry-run")
+
+    def test_saved_path_is_shared_with_app_and_environment_change_takes_precedence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "allowed"
+            root.mkdir()
+            default = root / "monitor-default"
+            selected = root / "selected-folder"
+            changed_default = root / "new-env-folder"
+            default.mkdir()
+            selected.mkdir()
+            changed_default.mkdir()
+            settings = Path(directory) / "monitor-target.json"
+            common = {"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite://",
+                      "QUARANTINE_PATH": Path(directory) / "quarantine",
+                      "MONITOR_ALLOWED_ROOTS": str(root), "MONITOR_PATH_SETTINGS_PATH": settings}
+            first = create_app({**common, "MONITOR_TARGET_PATH": default})
+            monitor = first.extensions["monitoring_service"]
+            monitor.set_target_path(selected)
+            with self.assertRaises(ValueError):
+                monitor.set_target_path(root)
+            with self.assertRaises(ValueError):
+                monitor.set_target_path(Path(directory))
+            second = create_app({**common, "MONITOR_TARGET_PATH": default})
+            self.assertEqual(second.extensions["monitoring_service"].target_path, selected.resolve())
+            third = create_app({**common, "MONITOR_TARGET_PATH": changed_default})
+            self.assertEqual(third.extensions["monitoring_service"].target_path, changed_default.resolve())
+
+    def test_effective_runtime_snapshot_tracks_app_folder_policy_and_quarantine_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "allowed"
+            root.mkdir()
+            default = root / "watched-default"
+            selected = root / "watched-selected"
+            default.mkdir()
+            selected.mkdir()
+            runtime_path = Path(directory) / "runtime.json"
+            policy_path = Path(directory) / "custom-policy.json"
+            app = create_app({
+                "TESTING": True,
+                "SQLALCHEMY_DATABASE_URI": "sqlite://",
+                "MONITOR_ALLOWED_ROOTS": str(root),
+                "MONITOR_TARGET_PATH": default,
+                "MONITOR_POLICY_PATH": policy_path,
+                "MONITOR_RUNTIME_SETTINGS_PATH": runtime_path,
+                "QUARANTINE_PATH": Path(directory) / "quarantine",
+                "QUARANTINE_MODE": "dry-run",
+            })
+            monitor = app.extensions["monitoring_service"]
+            monitor.set_target_path(selected)
+            monitor.update_policy({**monitor.policy, "window_seconds": 17, "delete_threshold": 3,
+                                   "modify_threshold": 2, "mixed_threshold": 7,
+                                   "mixed_destructive_minimum": 2, "auto_quarantine": True})
+
+            snapshot = json.loads(runtime_path.read_text(encoding="utf-8"))
+            self.assertEqual(snapshot["target_path"], str(selected.resolve()))
+            self.assertEqual(snapshot["policy_path"], str(policy_path.resolve()))
+            self.assertEqual(snapshot["policy"]["window_seconds"], 17)
+            self.assertEqual(snapshot["policy"]["delete_threshold"], 3)
+            self.assertTrue(snapshot["auto_quarantine"])
+            self.assertEqual(snapshot["quarantine_mode"], "enabled")
+
+    def test_use_env_path_accepts_exact_configured_path_and_updates_runtime_snapshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            qa_root = root / "qa"
+            watched = qa_root / "watched"
+            dotenv_target = root / "dotenv-watched"
+            qa_root.mkdir()
+            watched.mkdir()
+            dotenv_target.mkdir()
+            runtime_path = root / "runtime.json"
+            app = create_app({
+                "TESTING": True,
+                "SQLALCHEMY_DATABASE_URI": "sqlite://",
+                "MONITOR_TARGET_PATH": watched,
+                "MONITOR_ENV_TARGET_PATH": dotenv_target,
+                "MONITOR_ALLOWED_ROOTS": str(qa_root),
+                "MONITOR_RUNTIME_SETTINGS_PATH": runtime_path,
+                "MONITOR_PATH_SETTINGS_PATH": root / "path.json",
+                "QUARANTINE_PATH": root / "quarantine",
+            })
+            monitor = app.extensions["monitoring_service"]
+            selected = monitor.reset_target_path()
+
+            snapshot = json.loads(runtime_path.read_text(encoding="utf-8"))
+            self.assertEqual(selected, dotenv_target.resolve())
+            self.assertEqual(snapshot["target_path"], str(dotenv_target.resolve()))
+            saved_path = json.loads((root / "path.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved_path["environment_target"], str(watched.resolve()))
+
+
 class ResponseTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.app = create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite://",
+        self.app = create_app({"TESTING": True, "WTF_CSRF_ENABLED": False, "SQLALCHEMY_DATABASE_URI": "sqlite://",
             "MONITOR_TARGET_PATH": self.root / "decoy", "QUARANTINE_PATH": self.root / "quarantine",
+            "MONITOR_ENV_TARGET_PATH": self.root / "env-monitor-target",
             "RESPONSE_WEBHOOK_URL": "", "RESPONSE_EMAIL_TO": "", "QUARANTINE_MODE": "enabled",
             "AUTO_QUARANTINE": True})
+        Path(self.app.config["MONITOR_ENV_TARGET_PATH"]).mkdir(parents=True, exist_ok=True)
         self.context = self.app.app_context()
         self.context.push()
         self.addCleanup(self.context.pop)
@@ -75,8 +233,11 @@ class ResponseTests(unittest.TestCase):
         with patch("app.response.urlopen") as webhook, patch("app.response.smtplib.SMTP") as smtp:
             webhook.return_value.__enter__.return_value.status = 202
             action = respond(self.app, self.alert(), self.monitor.target_path, set())
-            self.assertEqual(action.result["notifications"], {"webhook": "sent", "email": "sent"})
+            self.assertEqual(action.result["notifications"], {"webhook": "sent", "email": "accepted_by_smtp"})
             smtp.return_value.__enter__.return_value.send_message.assert_called_once()
+            attempt = action.result["notification_attempts"]["email"][0]
+            self.assertEqual(attempt["status"], "accepted_by_smtp")
+            self.assertTrue(attempt["message_id"].startswith("<"))
 
     def test_owned_alert_email_goes_to_account_not_global_fallback(self):
         self.app.config.update(RESPONSE_EMAIL_TO="old-recipient@example.invalid",
@@ -91,7 +252,7 @@ class ResponseTests(unittest.TestCase):
             action = respond(self.app, alert, self.monitor.target_path, set())
             message = smtp.return_value.__enter__.return_value.send_message.call_args.args[0]
         self.assertEqual(message["To"], "account-owner@example.invalid")
-        self.assertEqual(action.result["notifications"]["email"], "sent")
+        self.assertEqual(action.result["notifications"]["email"], "accepted_by_smtp")
 
     def test_alert_email_lists_changed_file_paths(self):
         self.app.config.update(RESPONSE_EMAIL_TO="analyst@example.invalid",
@@ -217,7 +378,7 @@ class ResponseTests(unittest.TestCase):
             connection.send_message.return_value = {}
             action = respond(self.app, self.alert(), self.monitor.target_path, set())
             self.assertEqual([call[0] for call in connection.method_calls], ['starttls', 'login', 'send_message'])
-            self.assertEqual(action.result["notifications"]["email"], "sent")
+            self.assertEqual(action.result["notifications"]["email"], "accepted_by_smtp")
             message = connection.send_message.call_args.args[0]
             plain_body = message.get_body(preferencelist=("plain",)).get_content()
             html_body = message.get_body(preferencelist=("html",)).get_content()
@@ -255,7 +416,7 @@ class ResponseTests(unittest.TestCase):
         self.assertIn("Published MLRan research dataset", html_body)
         self.assertNotIn('"alert": {', body)
         self.assertIn("dataset analysis flagged records", message["Subject"])
-        self.assertEqual(action.result["notifications"]["email"], "sent")
+        self.assertEqual(action.result["notifications"]["email"], "accepted_by_smtp")
 
     def test_incomplete_smtp_fails_without_connecting(self):
         self.app.config.update(RESPONSE_EMAIL_TO="test@example.invalid", SMTP_HOST="", RESPONSE_EMAIL_FROM="")
@@ -353,6 +514,41 @@ class ResponseTests(unittest.TestCase):
         self.assertEqual(action.result["quarantine"], "quarantined")
         self.assertTrue(all(item["manual"] is False for item in action.result["files"]))
 
+    def test_automatic_quarantine_obeys_count_extension_and_path_exclusions(self):
+        policy = dict(self.monitor.policy)
+        policy.update(auto_quarantine=True, auto_quarantine_max_files=1,
+                      auto_quarantine_max_file_mb=1,
+                      auto_quarantine_excluded_extensions=[".tmp"],
+                      auto_quarantine_excluded_paths=["private"])
+        self.monitor.update_policy(policy)
+        (self.monitor.target_path / "a.txt").write_text("eligible")
+        (self.monitor.target_path / "b.txt").write_text("over cap")
+        (self.monitor.target_path / "c.tmp").write_text("excluded extension")
+        (self.monitor.target_path / "private").mkdir()
+        (self.monitor.target_path / "private" / "d.txt").write_text("excluded folder")
+        action = respond(self.app, self.alert(), self.monitor.target_path,
+                         {"a.txt", "b.txt", "c.tmp", "private/d.txt"})
+        results = {item["source"]: item["status"] for item in action.result["files"]}
+        self.assertEqual(results, {"a.txt": "quarantined", "b.txt": "skipped_file_limit",
+                                   "c.tmp": "excluded_extension", "private/d.txt": "excluded_path"})
+        self.assertEqual(action.result["quarantine"], "policy_limited")
+        self.assertFalse((self.monitor.target_path / "a.txt").exists())
+        self.assertTrue((self.monitor.target_path / "b.txt").exists())
+        self.assertTrue((self.monitor.target_path / "c.tmp").exists())
+        self.assertTrue((self.monitor.target_path / "private" / "d.txt").exists())
+
+    def test_automatic_quarantine_skips_file_over_size_limit(self):
+        policy = dict(self.monitor.policy)
+        policy.update(auto_quarantine=True, auto_quarantine_max_files=5,
+                      auto_quarantine_max_file_mb=1)
+        self.monitor.update_policy(policy)
+        large_file = self.monitor.target_path / "large.bin"
+        large_file.write_bytes(b"x" * (1024 * 1024 + 1))
+        action = respond(self.app, self.alert(), self.monitor.target_path, {"large.bin"})
+        self.assertEqual(action.result["files"][0]["status"], "skipped_size_limit")
+        self.assertEqual(action.result["quarantine"], "policy_limited")
+        self.assertTrue(large_file.exists())
+
     def test_monitor_policy_rejects_invalid_values(self):
         invalid = {
             "window_seconds": 301,
@@ -404,6 +600,26 @@ class ResponseTests(unittest.TestCase):
             session["_fresh"] = True
         self.assertTrue(client.get("/api/alerts").json["alerts"][0]["response"]["completed"])
         self.assertEqual(client.get("/dashboard").status_code, 200)
+
+    def test_authenticated_synthetic_validation_and_monitor_path_routes(self):
+        user = User(full_name="Route Tester", email="route-tester@example.invalid", password_hash="unused")
+        db.session.add(user)
+        db.session.commit()
+        client = self.app.test_client()
+        with client.session_transaction() as session:
+            session["_user_id"] = str(user.id)
+            session["_fresh"] = True
+        synthetic = client.post("/api/monitor/policy/validate-synthetic", json={})
+        self.assertEqual(synthetic.status_code, 200)
+        self.assertEqual(synthetic.json["validation"]["scenario_count"], 10)
+        selected = self.root / "alternate-monitor-folder"
+        selected.mkdir()
+        changed = client.post("/api/monitor/path", json={"target_path": str(selected)})
+        self.assertEqual(changed.status_code, 200)
+        self.assertEqual(self.monitor.target_path, selected.resolve())
+        reset = client.post("/api/monitor/path", json={"reset": True})
+        self.assertEqual(reset.status_code, 200, reset.json)
+        self.assertEqual(self.monitor.target_path, Path(self.monitor.dotenv_target_value))
 
     def test_anonymous_access_denied(self):
         self.assertEqual(self.app.test_client().get("/api/alerts").status_code, 302)

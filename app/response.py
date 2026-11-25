@@ -8,6 +8,7 @@ import ssl
 import stat
 from datetime import datetime, timezone
 from email.message import EmailMessage
+from email.utils import make_msgid
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -28,6 +29,7 @@ def _quarantine_status_label(status: str) -> str:
         "quarantined": "Completed",
         "manually_quarantined": "Completed manually",
         "no_files": "No eligible files",
+        "policy_limited": "Completed with files skipped by quarantine safeguards",
     }
     if not isinstance(status, str) or not status.strip():
         return "Not available"
@@ -73,10 +75,20 @@ def _format_alert_email(alert, result, app_name: str) -> tuple[str, str]:
         if alert.details:
             lines.append(f"Run details: {public_alert_details(alert.details)}")
     elif model_version.startswith(("rolling-file-burst", "browser-folder-burst", "endpoint-agent-burst")):
+        evaluation = trace.get("rule_evaluation") or {}
+        counts = evaluation.get("operation_counts") or {}
         lines.extend([
             "Analysis type: Live monitored-folder activity",
             "A rolling file-change rule crossed its review threshold.",
-            f"Activity score: {alert.risk_score}/100 (heuristic, not a probability)",
+            f"Burst intensity: {alert.risk_score}/100 (heuristic, not a probability)",
+            (f"Observed: {evaluation.get('distinct_files', 'unknown')} distinct files; "
+             f"{evaluation.get('distinct_file_operations', 'unknown')} distinct path-operation types "
+             f"({counts.get('created', 0)} created, {counts.get('modified', 0)} modified, "
+             f"{counts.get('deleted', 0)} deleted) in {evaluation.get('window_seconds', 'unknown')} seconds."),
+            *[f"Threshold: {check.get('rule')} observed {check.get('observed')}, limit {check.get('threshold')}"
+              + (f"; edits/deletions {check['requires'].get('observed')}/{check['requires'].get('threshold')} required"
+                 if check.get("requires") else "") + (" (triggered)" if check.get("triggered") else "")
+              for check in evaluation.get("checks", [])],
             public_alert_details(alert.details),
             "These alerts flag unusual file activity and do not identify its cause.",
         ])
@@ -95,7 +107,9 @@ def _format_alert_email(alert, result, app_name: str) -> tuple[str, str]:
     lines.extend([
         f"Alert ID: {alert.id}",
         f"Files moved to quarantine: {files_moved}",
+        f"Files skipped by safeguards: {sum(str(item.get('status', '')).startswith(('excluded_', 'skipped_')) for item in result.get('files', []))}",
         f"Quarantine status: {_quarantine_status_label(result.get('quarantine', 'not available'))}",
+        "SMTP acceptance does not confirm inbox delivery." if result.get("notifications", {}).get("email") == "accepted_by_smtp" else None,
         "Review this alert and its CSV report in the RansomShield dashboard.",
     ])
     if not files_moved:
@@ -115,6 +129,8 @@ def _format_alert_email_html(alert, result, app_name: str) -> str:
     trace = {item.get("signal"): item.get("value") for item in (alert.rule_trace or [])}
     moved = sum(item.get("status") == "quarantined" for item in result.get("files", []))
     failed = sum(item.get("status") == "failed" for item in result.get("files", []))
+    skipped = sum(str(item.get("status", "")).startswith(("excluded_", "skipped_"))
+                  for item in result.get("files", []))
     model_version = alert.model_version or "Not specified"
     rows = [
         ("Alert ID", alert.id),
@@ -131,11 +147,25 @@ def _format_alert_email_html(alert, result, app_name: str) -> str:
         ])
         note = "This report describes records in the evaluated CSV. It does not indicate that a monitored computer is infected."
     elif model_version.startswith(("rolling-file-burst", "browser-folder-burst", "endpoint-agent-burst")):
+        evaluation = trace.get("rule_evaluation") or {}
+        counts = evaluation.get("operation_counts") or {}
+        observed = (f"{evaluation.get('distinct_files', 'unknown')} distinct files; "
+                   f"{evaluation.get('distinct_file_operations', 'unknown')} path-operation types "
+                   f"({counts.get('created', 0)} created, {counts.get('modified', 0)} modified, "
+                   f"{counts.get('deleted', 0)} deleted) in {evaluation.get('window_seconds', 'unknown')} seconds.")
+        thresholds = "\n".join(
+            f"{check.get('rule')}: {check.get('observed')}/{check.get('threshold')}"
+            + (f"; edits/deletions {check['requires'].get('observed')}/{check['requires'].get('threshold')}"
+               if check.get("requires") else "")
+            + (" (triggered)" if check.get("triggered") else "")
+            for check in evaluation.get("checks", [])) or "No rule detail available"
         rows.extend([
             ("Analysis type", "Live monitored-folder activity"),
-            ("Activity score", f"{alert.risk_score}/100 (heuristic, not a probability)"),
+            ("Burst intensity", f"{alert.risk_score}/100 (heuristic, not a probability)"),
             ("Detection rule", model_version),
-            ("Observed activity", public_alert_details(alert.details) or "Not specified"),
+            ("Observed activity", observed),
+            ("Rule checks", thresholds),
+            ("Details", public_alert_details(alert.details) or "Not specified"),
         ])
         note = "These alerts flag unusual file activity and do not identify its cause."
     else:
@@ -150,6 +180,7 @@ def _format_alert_email_html(alert, result, app_name: str) -> str:
     rows.extend([
         ("Files quarantined", moved),
         ("Quarantine failures", failed),
+        ("Files skipped by safeguards", skipped),
         ("Quarantine status", _quarantine_status_label(result.get("quarantine", "not available"))),
     ])
     table_rows = "".join(
@@ -193,7 +224,7 @@ def _format_alert_email_html(alert, result, app_name: str) -> str:
     )
 
 
-def _send_alert_email(app, alert, result, recipient: str) -> None:
+def _send_alert_email(app, alert, result, recipient: str) -> str:
     config = app.config
     if not recipient:
         raise ValueError("No recipient is configured for this alert")
@@ -208,6 +239,7 @@ def _send_alert_email(app, alert, result, recipient: str) -> None:
     message["Subject"] = subject
     message["From"] = config["RESPONSE_EMAIL_FROM"]
     message["To"] = recipient
+    message["Message-ID"] = make_msgid()
     message.set_content(body)
     message.add_alternative(_format_alert_email_html(alert, result, app_name), subtype="html")
     context = ssl.create_default_context()
@@ -221,6 +253,7 @@ def _send_alert_email(app, alert, result, recipient: str) -> None:
         refused = smtp.send_message(message)
         if isinstance(refused, dict) and refused:
             raise ValueError("Recipient was refused by the SMTP server")
+    return message["Message-ID"]
 
 
 def retry_alert_email(app, alert, action) -> bool:
@@ -230,9 +263,9 @@ def retry_alert_email(app, alert, action) -> bool:
     recipient = _email_recipient(alert, app.config)
     attempted_at = datetime.now(timezone.utc).isoformat()
     try:
-        _send_alert_email(app, alert, result, recipient)
-        notifications["email"] = "sent"
-        attempt = {"status": "sent", "at": attempted_at}
+        message_id = _send_alert_email(app, alert, result, recipient)
+        notifications["email"] = "accepted_by_smtp"
+        attempt = {"status": "accepted_by_smtp", "at": attempted_at, "message_id": message_id}
     except Exception as exc:
         notifications["email"] = "failed"
         attempt = {"status": "failed", "at": attempted_at,
@@ -245,7 +278,7 @@ def retry_alert_email(app, alert, action) -> bool:
     action.result = json.loads(json.dumps(result))
     flag_modified(action, "result")
     db.session.commit()
-    return notifications["email"] == "sent"
+    return notifications["email"] == "accepted_by_smtp"
 
 
 def respond(app, alert, root, affected, quarantine_allowed=True):
@@ -273,6 +306,14 @@ def respond(app, alert, root, affected, quarantine_allowed=True):
             destination.mkdir(parents=True, exist_ok=True)
             if destination.resolve() != destination:
                 raise ValueError("Quarantine destination must not contain links")
+        policy = (app.extensions.get("monitoring_service").policy
+                  if app.extensions.get("monitoring_service") else {})
+        max_files = int(policy.get("auto_quarantine_max_files", 20))
+        max_size = int(policy.get("auto_quarantine_max_file_mb", 50)) * 1024 * 1024
+        excluded_extensions = {str(item).lower() for item in policy.get("auto_quarantine_excluded_extensions", [])}
+        excluded_paths = [str(item).replace("\\", "/").strip("/").casefold()
+                          for item in policy.get("auto_quarantine_excluded_paths", [])]
+        eligible_count = 0
         for name in sorted(affected):
             record = {"source": name}
             try:
@@ -291,9 +332,31 @@ def respond(app, alert, root, affected, quarantine_allowed=True):
                         raise ValueError("Links and reparse points are excluded")
                 if not stat.S_ISREG(source.stat().st_mode):
                     raise ValueError("Only regular files can be quarantined")
+                normalized = relative.as_posix().casefold()
+                extension = relative.suffix.lower()
+                if extension in excluded_extensions:
+                    record.update(status="excluded_extension", reason=f"Excluded by extension rule ({extension})")
+                    result["files"].append(record)
+                    continue
+                if any(normalized == prefix or normalized.startswith(prefix + "/")
+                       for prefix in excluded_paths if prefix):
+                    record.update(status="excluded_path", reason="Excluded by folder rule")
+                    result["files"].append(record)
+                    continue
                 target = destination / relative
-                digest = sha256_file(source)
                 size = source.stat().st_size
+                if size > max_size:
+                    record.update(status="skipped_size_limit", size_bytes=size,
+                                  reason=f"File exceeds the configured {max_size // (1024 * 1024)} MB limit")
+                    result["files"].append(record)
+                    continue
+                if eligible_count >= max_files:
+                    record.update(status="skipped_file_limit", size_bytes=size,
+                                  reason=f"Alert file limit is {max_files}")
+                    result["files"].append(record)
+                    continue
+                eligible_count += 1
+                digest = sha256_file(source)
                 if dry_run:
                     record.update(status="would_quarantine", destination=str(target), sha256=digest)
                 else:
@@ -316,7 +379,8 @@ def respond(app, alert, root, affected, quarantine_allowed=True):
                     record.update(status="quarantined", destination=str(target), sha256=digest, manual=False)
             except (OSError, ValueError) as exc:
                 record.update(status="failed", error=str(exc))
-            result["files"].append(record)
+            if not any(item is record for item in result["files"]):
+                result["files"].append(record)
             action.result = dict(result)
             flag_modified(action, "result")
             db.session.commit()
@@ -333,6 +397,8 @@ def respond(app, alert, root, affected, quarantine_allowed=True):
             result["quarantine"] = "dry_run"
         elif "failed" in statuses:
             result["quarantine"] = "partial_failure"
+        elif any(status.startswith(("excluded_", "skipped_")) for status in statuses):
+            result["quarantine"] = "policy_limited"
         else:
             result["quarantine"] = "quarantined" if result["files"] else "no_files"
     payload = {"alert": alert.to_dict(), "files": result["files"]}
@@ -353,10 +419,12 @@ def respond(app, alert, root, affected, quarantine_allowed=True):
                     if not 200 <= response.status < 300:
                         raise ValueError("Webhook rejected notification")
             else:
-                _send_alert_email(app, alert, result, email_recipient)
-            result["notifications"][channel] = "sent"
+                message_id = _send_alert_email(app, alert, result, email_recipient)
+            notification_state = "accepted_by_smtp" if channel == "email" else "sent"
+            result["notifications"][channel] = notification_state
             result["notification_attempts"].setdefault(channel, []).append(
-                {"status": "sent", "at": datetime.now(timezone.utc).isoformat()})
+                {"status": notification_state, "at": datetime.now(timezone.utc).isoformat(),
+                 **({"message_id": message_id} if channel == "email" else {})})
         except Exception as exc:
             result["notifications"][channel] = "failed"
             result["notification_attempts"].setdefault(channel, []).append(

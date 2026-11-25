@@ -19,13 +19,16 @@ auth = Blueprint("auth", __name__, url_prefix="/auth")
 
 
 def is_safe_redirect_target(target: Optional[str]) -> bool:
-    """Allow only redirects that remain on the current host."""
+    """Allow same-host page redirects, but never send a signed-in browser to a JSON API."""
     if not target:
         return False
 
     host_url = urlparse(request.host_url)
     redirect_url = urlparse(urljoin(request.host_url, target))
-    return redirect_url.scheme in {"http", "https"} and host_url.netloc == redirect_url.netloc
+    if redirect_url.scheme not in {"http", "https"} or host_url.netloc != redirect_url.netloc:
+        return False
+    api_path = redirect_url.path.rstrip("/")
+    return api_path != "/api" and not api_path.startswith("/api/")
 
 
 @auth.route("/signup", methods=["GET", "POST"])

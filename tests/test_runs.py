@@ -298,9 +298,9 @@ class RunTests(unittest.TestCase):
             smtp.return_value.__enter__.return_value.send_message.return_value = {}
             response = self.client.post(f'/api/alerts/{alert.id}/retry-email')
         self.assertEqual(response.status_code, 200, response.json)
-        self.assertEqual(response.json['alert']['response']['notifications']['email'], 'sent')
+        self.assertEqual(response.json['alert']['response']['notifications']['email'], 'accepted_by_smtp')
         attempts = response.json['alert']['response']['notification_attempts']['email']
-        self.assertEqual(attempts[-1]['status'], 'sent')
+        self.assertEqual(attempts[-1]['status'], 'accepted_by_smtp')
         self.assertEqual(AuditLog.query.filter_by(action='alert_email_retried').count(), 1)
 
     def test_email_retry_cannot_be_used_to_duplicate_an_accepted_message(self):
@@ -426,7 +426,7 @@ class RunTests(unittest.TestCase):
         self.assertTrue(response.json['alert_created'])
         self.assertEqual(MonitoringEvent.query.filter_by(source='browser', user_id=self.user.id).count(), 20)
         alert = Alert.query.filter_by(model_version='browser-folder-burst-v1', user_id=self.user.id).one()
-        self.assertIn('20 distinct file changes', alert.details)
+        self.assertIn('20 distinct files', alert.details)
         self.assertIn({'signal': 'selected_folder_id', 'value': folder_id}, alert.rule_trace)
         self.assertTrue(alert.responses[0].completed)
         duplicate = self.client.post('/api/browser-folder/events', json={"folder_id": folder_id, "events": events})

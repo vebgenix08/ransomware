@@ -92,8 +92,8 @@
             <div class="col-sm-6 col-xl-3">
                 <article class="status-card">
                     <div class="d-flex justify-content-between"><span class="status-icon"><i class="bi bi-bell"></i></span><span class="state-badge" :class="alertCount ? '' : 'running'" x-text="alertCount ? 'Review' : 'Clear'"></span></div>
-                    <div class="metric-value mt-4"><span x-text="status.last_risk_score"></span><small class="fs-6">/100</small></div><span class="muted small">Server-folder activity score</span>
-                    <div class="small muted mt-1">Rule-based activity score; not a probability</div>
+                    <div class="metric-value mt-4"><span x-text="status.last_risk_score"></span><small class="fs-6">/100</small></div><span class="muted small">Server-folder burst intensity</span>
+                    <div class="small muted mt-1">Heuristic threshold indicator; not a probability</div>
                     <div class="small muted mt-2"><span x-text="status.monitored_files || 0"></span> files in the server folder</div>
                 </article>
             </div>
@@ -161,24 +161,56 @@
             </div>
         </div>
         <section class="panel p-4 mb-4" aria-labelledby="monitor-policy-heading">
-            <div class="dashboard-section-heading mb-3"><div><span class="dashboard-section-kicker">Live monitoring settings</span><h3 id="monitor-policy-heading" class="h5">Alert limits and quarantine</h3><p class="small muted">These limits apply to live server, browser-folder, and endpoint alerts. Counts are distinct file paths; repeated edits to one file count once. Alerts have a 60-second cooldown. Stop the server monitor before saving.</p></div></div>
+            <div class="dashboard-section-heading mb-3"><div><span class="dashboard-section-kicker">Live monitoring settings</span><h3 id="monitor-policy-heading" class="h5">Alert limits and quarantine</h3><p class="small muted">These limits apply to live server, browser-folder, and endpoint alerts. Each path is counted once per operation type in the time window. Alerts have a 60-second cooldown. Stop the server monitor before changing shared settings.</p></div></div>
+            <form @submit.prevent="saveMonitorPath" class="border rounded p-3 mb-3">
+                <div class="row g-2 align-items-end">
+                    <label class="col-12 col-lg-8 small">Server folder path<input class="form-control mt-1" type="text" x-model="monitorPathValue" @input="monitorPathDirty=true" placeholder="Absolute path on the computer running RansomShield" :disabled="status.running || status.settings_locked || busy" required></label>
+                    <div class="col-12 col-lg-4 d-flex gap-2"><button class="btn-outline-custom flex-grow-1" type="submit" :disabled="status.running || status.settings_locked || busy">Save folder</button><button class="btn-outline-custom" type="button" @click="resetMonitorPath" :disabled="status.running || status.settings_locked || busy">Use .env path</button></div>
+                </div>
+                <p class="small muted mt-2 mb-1">The folder must already exist and be inside an allowed location, or exactly match the configured <code>MONITOR_TARGET_PATH</code>. Allowed locations: <span x-text="(status.allowed_roots || []).join(' · ') || 'Loading…'"></span></p>
+                <p class="small muted mb-0">The saved folder is shared by the server monitor and demo script. Changing <code>MONITOR_TARGET_PATH</code> in <code>.env</code> overrides this selection after restart.</p>
+                <p class="small text-warning mt-2 mb-0" x-show="status.settings_locked">Another account is using the shared monitor. Stop it from that account before changing its path or limits.</p>
+            </form>
             <form @submit.prevent="saveMonitorPolicy" class="row g-3 align-items-end">
-                <label class="col-6 col-lg-2 small">Time window (seconds)<input class="form-control mt-1" type="number" min="5" max="300" x-model.number="monitorPolicy.window_seconds" @input="policyDirty=true" :disabled="status.running || busy" required></label>
-                <label class="col-6 col-lg-2 small">Deletion limit<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.delete_threshold" @input="policyDirty=true" :disabled="status.running || busy" required></label>
-                <label class="col-6 col-lg-2 small">Modification limit<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.modify_threshold" @input="policyDirty=true" :disabled="status.running || busy" required></label>
-                <label class="col-6 col-lg-2 small">Total changes limit<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.mixed_threshold" @input="policyDirty=true" :disabled="status.running || busy" required></label>
-                <label class="col-6 col-lg-2 small">Minimum deletes or edits<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.mixed_destructive_minimum" @input="policyDirty=true" :disabled="status.running || busy" required></label>
-                <div class="col-12 col-lg-2"><button class="btn-outline-custom w-100" type="submit" :disabled="status.running || busy">Save settings</button></div>
+                <label class="col-6 col-lg-2 small">Time window (seconds)<input class="form-control mt-1" type="number" min="5" max="300" x-model.number="monitorPolicy.window_seconds" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label>
+                <label class="col-6 col-lg-2 small">Deletion limit<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.delete_threshold" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label>
+                <label class="col-6 col-lg-2 small">Modification limit<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.modify_threshold" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label>
+                <label class="col-6 col-lg-2 small">Total changes limit<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.mixed_threshold" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label>
+                <label class="col-6 col-lg-2 small">Minimum deletes or edits<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.mixed_destructive_minimum" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label>
+                <div class="col-12 col-lg-2"><button class="btn-outline-custom w-100" type="submit" :disabled="status.running || status.settings_locked || busy">Save settings</button></div>
                 <div class="col-12">
-                    <label class="d-flex align-items-start gap-2"><input type="checkbox" class="form-check-input mt-1" x-model="monitorPolicy.auto_quarantine" @change="policyDirty=true" :disabled="status.running || busy"><span><strong>Automatically quarantine changed files when an alert triggers</strong><span class="small muted d-block">Moves created or modified files that still exist in the server folder. Deleted files cannot be moved. This can catch normal work by mistake; leave it off until you have tested your limits.</span></span></label>
-            <p class="small muted mt-2 mb-0">Server-folder quarantine can be manual or automatic. Selected-folder quarantine is manual and runs in the browser after read/write permission; dataset files are never quarantined.</p>
+                    <label class="d-flex align-items-start gap-2"><input type="checkbox" class="form-check-input mt-1" x-model="monitorPolicy.auto_quarantine" @change="policyDirty=true" :disabled="status.running || status.settings_locked || busy"><span><strong>Automatically quarantine changed files when an alert triggers</strong><span class="small muted d-block">Files move immediately when the server-folder rule triggers. Review the affected-file list in the alert; future changes cannot be previewed in advance. Deleted files cannot be moved.</span></span></label>
+                    <div class="row g-3 mt-1">
+                        <label class="col-6 col-lg-3 small">Maximum files per alert<input class="form-control mt-1" type="number" min="1" max="100" x-model.number="monitorPolicy.auto_quarantine_max_files" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy"></label>
+                        <label class="col-6 col-lg-3 small">Maximum file size (MB)<input class="form-control mt-1" type="number" min="1" max="500" x-model.number="monitorPolicy.auto_quarantine_max_file_mb" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy"></label>
+                        <label class="col-12 col-lg-3 small">Excluded extensions<input class="form-control mt-1" type="text" x-model="quarantineExcludedExtensionsText" @input="policyDirty=true" placeholder=".tmp, .log" :disabled="status.running || status.settings_locked || busy"><span class="muted">Comma separated</span></label>
+                        <label class="col-12 col-lg-3 small">Excluded relative folders<input class="form-control mt-1" type="text" x-model="quarantineExcludedPathsText" @input="policyDirty=true" placeholder="exports, backups/archive" :disabled="status.running || status.settings_locked || busy"><span class="muted">Comma separated, inside monitored folder</span></label>
+                    </div>
+                    <details class="small mt-2" x-show="monitorPolicy.auto_quarantine && latestServerFolderAlert()">
+                        <summary>Preview files from the latest server-folder alert</summary>
+                        <ul class="mt-2 mb-0"><template x-for="file in (latestServerFolderAlert()?.rule_trace || []).find(item => item.signal === 'affected_files')?.value || []" :key="file.path"><li><span x-text="file.path"></span> · <span x-text="(file.operations || []).join(', ')"></span></li></template></ul>
+                    </details>
+                    <p class="small muted mt-2 mb-0" x-show="monitorPolicy.auto_quarantine && !latestServerFolderAlert()">No recent server-folder alert is available to preview yet. Future affected paths will be listed on their alerts.</p>
+                    <p class="small muted mt-2 mb-0">Restore location: <code x-text="status.quarantine_location || 'Loading…'"></code>. Selected-folder files still require a manual action.</p>
+                    <p class="small muted mt-1 mb-0">Current mode: <strong x-text="status.quarantine_mode || 'Loading…'"></strong></p>
+                    <p class="small text-warning mt-1 mb-0" x-show="status.quarantine_mode === 'dry-run'">Dry-run records what would be moved but leaves files in place. Saving automatic quarantine from this page switches to active moves.</p>
+                    <p class="small text-danger mt-2 mb-0">Automatic quarantine is an immediate file move, not a harmless preview. Use a test folder first and exclude important folders.</p>
                 </div>
             </form>
             <div class="mt-3 d-flex flex-wrap align-items-center gap-2">
-                <button type="button" class="btn-outline-custom" @click="simulatePolicy" :disabled="busy">Test limits on last 24 hours</button>
+                <button type="button" class="btn-outline-custom" @click="simulatePolicy" :disabled="busy">Replay saved activity (unlabeled)</button>
                 <span class="small muted" x-show="policySimulation" x-text="policySimulation ? `${policySimulation.would_alert_count} alert window(s) would have triggered from ${policySimulation.events_replayed} saved file changes. This does not tell false alarms from attacks.` : ''"></span>
+                <button type="button" class="btn-outline-custom" @click="validateSyntheticPolicy" :disabled="busy">Validate labeled synthetic scenarios</button>
             </div>
             <p class="small text-danger mt-2 mb-0" x-show="policySimulationError" x-text="policySimulationError"></p>
+            <div class="mt-3" x-show="syntheticValidation">
+                <p class="small mb-2" x-text="syntheticSummary(syntheticValidation)"></p>
+                <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Scenario</th><th>Expected</th><th>Rule result</th></tr></thead><tbody>
+                    <template x-for="scenario in (syntheticValidation?.scenarios || [])" :key="scenario.scenario"><tr><td x-text="scenario.scenario.replaceAll('_', ' ')"></td><td x-text="scenario.expected"></td><td x-text="scenario.predicted + (scenario.correct ? ' · matches label' : ' · false alert')"></td></tr></template>
+                </tbody></table></div>
+                <p class="small muted mb-0" x-text="syntheticValidation?.limitations"></p>
+            </div>
+            <p class="small text-danger mt-2 mb-0" x-show="syntheticValidationError" x-text="syntheticValidationError"></p>
         </section>
 
         <section class="panel p-4 mb-4" aria-labelledby="devices-heading">
@@ -313,8 +345,16 @@
                         <span class="feed-icon" :class="alert.severity"><i class="bi bi-shield-exclamation"></i></span>
                         <div>
                             <strong class="d-block" x-text="alert.title"></strong>
-                            <p class="small mb-1">Incident #<span x-text="alert.id"></span> · <span x-show="isLiveActivityAlert(alert)">Activity score <span x-text="alert.risk_score"></span>/100 · Rule-based anomaly; review required.</span><span x-show="!isLiveActivityAlert(alert)">Dataset evaluation flagged records; score <span x-text="alert.risk_score"></span>/100. This refers to the evaluated CSV, not your computer.</span> · <a :href="'/api/alerts/' + alert.id + '/report.csv'">Download CSV</a></p>
+                            <p class="small mb-1">Incident #<span x-text="alert.id"></span> · <span x-show="isLiveActivityAlert(alert)">Burst intensity <span x-text="alert.risk_score"></span>/100 · heuristic, not a probability.</span><span x-show="!isLiveActivityAlert(alert)">Dataset evaluation flagged records; score <span x-text="alert.risk_score"></span>/100. This refers to the evaluated CSV, not your computer.</span> · <a :href="'/api/alerts/' + alert.id + '/report.csv'">Download CSV</a></p>
                             <p class="muted small mb-1" x-text="alert.details"></p>
+                            <div class="small mb-2" x-show="alertRuleEvaluation(alert)">
+                                <p class="mb-1" x-text="ruleEvaluationSummary(alertRuleEvaluation(alert))"></p>
+                                <div class="d-flex flex-wrap gap-1">
+                                    <template x-for="check in (alertRuleEvaluation(alert)?.checks || [])" :key="check.signal">
+                                        <span class="badge" :class="check.triggered ? 'text-bg-warning' : 'text-bg-light border text-dark'" x-text="ruleCheckLabel(check)"></span>
+                                    </template>
+                                </div>
+                            </div>
                             <details class="small mb-2" x-show="(alert.rule_trace || []).some(item => item.signal === 'affected_files' && item.value?.length)">
                                 <summary>Changed files (paths relative to monitored folder)</summary>
                                 <div class="table-responsive mt-2">
@@ -347,9 +387,15 @@
                             <template x-if="alert.response">
                                 <div class="small mt-2">
                                     <strong x-text="alert.response.completed ? 'Response attempt recorded' : 'Response incomplete — review required'"></strong>
-                                    <p class="mb-1" x-text="`${(alert.response.files || []).filter(f => f.status === 'quarantined').length} files quarantined; ${(alert.response.files || []).filter(f => f.status === 'failed').length} files could not be moved.${alert.response.quarantine === 'disabled' ? ' Quarantine disabled.' : ''}`"></p>
-                                    <p class="muted mb-1" x-text="Object.entries(alert.response.notifications || {}).map(([name, state]) => `${name}: ${name === 'email' && state === 'sent' ? 'accepted by SMTP' : state}`).join(' · ')"></p>
+                                    <p class="mb-1" x-text="responseSummary(alert.response)"></p>
+                                    <p class="muted mb-1" x-text="Object.entries(alert.response.notifications || {}).map(([name, state]) => `${name}: ${name === 'email' && ['sent','accepted_by_smtp'].includes(state) ? 'accepted by SMTP; inbox delivery unconfirmed' : state}`).join(' · ')"></p>
                                     <button class="btn-outline-custom btn-sm py-1 px-2 mb-2" type="button" x-show="alert.response.notifications?.email === 'failed'" @click="retryAlertEmail(alert.id)" :disabled="busy">Retry email</button>
+                                    <details class="muted mb-2" x-show="(alert.response.notification_attempts?.email || []).length">
+                                        <summary>Email attempt history</summary>
+                                        <template x-for="(attempt, index) in alert.response.notification_attempts.email" :key="index">
+                                            <p class="mb-1" x-text="`${attempt.status === 'accepted_by_smtp' || attempt.status === 'sent' ? 'Accepted by SMTP (delivery unconfirmed)' : 'Failed'} · ${formatDate(attempt.at)}${attempt.message_id ? ' · ' + attempt.message_id : ''}${attempt.error ? ' · ' + attempt.error : ''}`"></p>
+                                        </template>
+                                    </details>
                                     <details x-show="(alert.response.files || []).length">
                                         <summary>File response details</summary>
                                         <template x-for="file in alert.response.files || []" :key="file.source">
@@ -371,7 +417,7 @@
         <section id="panel-account" role="tabpanel" aria-labelledby="tab-account" x-show="activeTab === 'account'" x-cloak>
         <section class="panel p-4 mb-4" id="email-settings" aria-labelledby="email-status-heading">
             <div class="d-flex flex-wrap justify-content-between align-items-start gap-2"><div><h2 id="email-status-heading" class="h4">Email alerts</h2><p class="small muted mb-1">Status: <strong x-text="notificationStatus.email || 'checking'">checking</strong> · Recipient: <strong x-text="notificationStatus.email_recipient || 'your signed-in account'">your signed-in account</strong></p></div><button class="btn-outline-custom py-2 px-3" type="button" @click="toggleEmailNotifications" :disabled="busy" x-text="notificationStatus.email_enabled ? 'Turn off email alerts' : 'Turn on email alerts'"></button></div>
-            <p class="small muted mb-0">A sent status means the SMTP server accepted the email, not that it reached the inbox. Check Spam if missing. Failed alert emails can be retried from the alert. SMTP server details are changed in the project <code>.env</code> file and need an app restart; secrets are not shown here.</p>
+            <p class="small muted mb-0">“Accepted by SMTP” means the mail server accepted the message; inbox delivery is not confirmed without a provider delivery event. Each attempt and failure is recorded on its alert. Failed alert emails can be retried. SMTP server details are changed in the project <code>.env</code> file and need an app restart; secrets are not shown here.</p>
         </section>
         <section class="panel mt-4">
             <div class="p-4 border-bottom d-flex justify-content-between align-items-center" style="border-color:var(--line)!important"><div><small class="muted">ACCOUNT HISTORY</small><h2 id="audit-heading" class="h4 mt-1 mb-0">Audit history</h2><span class="muted small">Sign-ins, monitoring actions, analyses, folder activity, and alert actions</span></div><button class="theme-toggle" type="button" @click="loadAudit" aria-label="Refresh audit history"><i class="bi bi-arrow-clockwise"></i></button></div>
@@ -471,11 +517,21 @@
                 modify_threshold: 20,
                 mixed_threshold: 30,
                 mixed_destructive_minimum: 10,
-                auto_quarantine: false
+                auto_quarantine: false,
+                auto_quarantine_max_files: 20,
+                auto_quarantine_max_file_mb: 50,
+                auto_quarantine_excluded_extensions: [],
+                auto_quarantine_excluded_paths: []
             },
             policyDirty: false,
             policySimulation: null,
             policySimulationError: '',
+            syntheticValidation: null,
+            syntheticValidationError: '',
+            monitorPathValue: '',
+            monitorPathDirty: false,
+            quarantineExcludedExtensionsText: '',
+            quarantineExcludedPathsText: '',
             init() {
                 this.refreshAll();
                 this.refreshTimer = window.setInterval(() => this.refreshAll(false), 3000);
@@ -540,7 +596,12 @@
                     ]);
                     const alertData = await this.fetchJson(this.alertQuery());
                     this.status = summary.status;
-                    if (!this.policyDirty && summary.status.policy) this.monitorPolicy = {...summary.status.policy};
+                    if (!this.monitorPathDirty) this.monitorPathValue = summary.status.target || '';
+                    if (!this.policyDirty && summary.status.policy) {
+                        this.monitorPolicy = {...summary.status.policy};
+                        this.quarantineExcludedExtensionsText = (summary.status.policy.auto_quarantine_excluded_extensions || []).join(', ');
+                        this.quarantineExcludedPathsText = (summary.status.policy.auto_quarantine_excluded_paths || []).join(', ');
+                    }
                     this.eventCount = summary.event_count;
                     this.alertCount = summary.alert_count;
                     this.events = eventData.events;
@@ -855,15 +916,42 @@
             metric(value) { return value == null ? 'undefined' : (value * 100).toFixed(2) + '%'; },
             stopMonitor() { return this.performAction('{{ url_for("api.stop_monitor") }}'); },
             async saveMonitorPolicy() {
+                const previouslyEnabled = Boolean(this.status.policy?.auto_quarantine);
+                if (this.monitorPolicy.auto_quarantine && (!previouslyEnabled || this.status.quarantine_mode === 'dry-run')) {
+                    const extensions = this.quarantineExcludedExtensionsText || 'none';
+                    const paths = this.quarantineExcludedPathsText || 'none';
+                    const restorePath = this.status.quarantine_location || 'the configured quarantine folder';
+                    const approved = window.confirm(`Enable automatic quarantine?\n\nOn a server-folder alert, files move immediately. The alert will list the affected paths, but future files cannot be previewed before the event.\n\nMaximum: ${this.monitorPolicy.auto_quarantine_max_files} files per alert, ${this.monitorPolicy.auto_quarantine_max_file_mb} MB each.\nExcluded extensions: ${extensions}\nExcluded folders: ${paths}\nRestore from: ${restorePath}\n\nContinue?`);
+                    if (!approved) { this.monitorPolicy.auto_quarantine = false; return; }
+                }
+                const payload = {...this.monitorPolicy,
+                    auto_quarantine_excluded_extensions: this.quarantineExcludedExtensionsText.split(',').map(value => value.trim()).filter(Boolean),
+                    auto_quarantine_excluded_paths: this.quarantineExcludedPathsText.split(',').map(value => value.trim()).filter(Boolean)};
                 const result = await this.performAction('/api/monitor/policy', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(this.monitorPolicy)
+                    body: JSON.stringify(payload)
                 });
                 if (result?.ok) {
                     this.policyDirty = false;
                     this.monitorPolicy = {...result.policy};
+                    this.quarantineExcludedExtensionsText = result.policy.auto_quarantine_excluded_extensions.join(', ');
+                    this.quarantineExcludedPathsText = result.policy.auto_quarantine_excluded_paths.join(', ');
                 }
+            },
+            async saveMonitorPath() {
+                const result = await this.performAction('/api/monitor/path', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({target_path: this.monitorPathValue})
+                });
+                if (result?.ok) { this.monitorPathValue = result.target; this.monitorPathDirty = false; }
+            },
+            async resetMonitorPath() {
+                const result = await this.performAction('/api/monitor/path', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({reset: true})
+                });
+                if (result?.ok) { this.monitorPathValue = result.target; this.monitorPathDirty = false; }
             },
             async simulatePolicy() {
                 this.policySimulationError = '';
@@ -874,6 +962,44 @@
                     });
                     this.showFeedback(`Replay complete: ${this.policySimulation.would_alert_count} alert window(s) from recent saved activity.`, 'info');
                 } catch (error) { this.policySimulationError = error.message; }
+            },
+            async validateSyntheticPolicy() {
+                this.syntheticValidationError = '';
+                try {
+                    const payload = {...this.monitorPolicy,
+                        auto_quarantine_excluded_extensions: this.quarantineExcludedExtensionsText.split(',').map(value => value.trim()).filter(Boolean),
+                        auto_quarantine_excluded_paths: this.quarantineExcludedPathsText.split(',').map(value => value.trim()).filter(Boolean)};
+                    const result = await this.fetchJson('/api/monitor/policy/validate-synthetic', {
+                        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+                    });
+                    this.syntheticValidation = result.validation;
+                } catch (error) { this.syntheticValidationError = error.message; }
+            },
+            syntheticPercent(value) { return value == null ? 'not available' : `${(value * 100).toFixed(1)}%`; },
+            syntheticSummary(validation) {
+                if (!validation) return '';
+                const matrix = validation.confusion_matrix;
+                return `${validation.scenario_count} hand-authored windows · false-positive rate ${this.syntheticPercent(validation.false_positive_rate)} · burst capture ${this.syntheticPercent(validation.burst_capture_rate)} · TP ${matrix.true_positive}, FP ${matrix.false_positive}, TN ${matrix.true_negative}, FN ${matrix.false_negative}`;
+            },
+            alertRuleEvaluation(alert) {
+                return (alert.rule_trace || []).find(item => item.signal === 'rule_evaluation')?.value || null;
+            },
+            latestServerFolderAlert() { return this.alerts.find(alert => alert.model_version === 'rolling-file-burst-v1') || null; },
+            ruleEvaluationSummary(evaluation) {
+                if (!evaluation) return '';
+                const counts = evaluation.operation_counts || {};
+                return `${evaluation.distinct_files} distinct files · ${evaluation.distinct_file_operations} distinct file-operation types (${counts.created || 0} created, ${counts.modified || 0} modified, ${counts.deleted || 0} deleted) in ${evaluation.window_seconds}s.`;
+            },
+            ruleCheckLabel(check) {
+                if (check.requires) return `${check.rule}: ${check.observed}/${check.threshold}; edits/deletions ${check.requires.observed}/${check.requires.threshold}${check.triggered ? ' · triggered' : ''}`;
+                return `${check.rule}: ${check.observed}/${check.threshold}${check.triggered ? ' · triggered' : ''}`;
+            },
+            responseSummary(response) {
+                const files = response.files || [];
+                const moved = files.filter(file => file.status === 'quarantined').length;
+                const failed = files.filter(file => file.status === 'failed').length;
+                const skipped = files.filter(file => ['skipped_size_limit', 'skipped_file_limit', 'excluded_extension', 'excluded_path'].includes(file.status)).length;
+                return `${moved} files quarantined; ${failed} failed; ${skipped} skipped by quarantine safeguards.${response.quarantine === 'disabled' ? ' Automatic quarantine is off.' : ''}`;
             },
             activityQuery() {
                 const params = new URLSearchParams({limit: '50'});
