@@ -53,11 +53,11 @@
         </div>
 
         <nav class="dashboard-tabs" role="tablist" aria-label="Dashboard pages">
-            <button class="dashboard-tab" type="button" role="tab" id="tab-start" :aria-selected="activeTab === 'start'" aria-controls="panel-start" @click="activeTab='start'"><i class="bi bi-compass me-1"></i>Start here</button>
-            <button class="dashboard-tab" type="button" role="tab" id="tab-monitor" :aria-selected="activeTab === 'monitor'" aria-controls="panel-monitor" @click="activeTab='monitor'"><i class="bi bi-folder2-open me-1"></i>Monitor files</button>
-            <button class="dashboard-tab" type="button" role="tab" id="tab-benchmark" :aria-selected="activeTab === 'benchmark'" aria-controls="panel-benchmark" @click="activeTab='benchmark'"><i class="bi bi-bar-chart me-1"></i>Offline SILRAD benchmark</button>
-            <button class="dashboard-tab" type="button" role="tab" id="tab-alerts" :aria-selected="activeTab === 'alerts'" aria-controls="panel-alerts" @click="activeTab='alerts'"><i class="bi bi-bell me-1"></i>Alerts</button>
-            <button class="dashboard-tab" type="button" role="tab" id="tab-account" :aria-selected="activeTab === 'account'" aria-controls="panel-account" @click="activeTab='account'"><i class="bi bi-gear me-1"></i>Email & history</button>
+            <button class="dashboard-tab" type="button" role="tab" id="tab-start" :aria-selected="activeTab === 'start'" aria-controls="panel-start" @click="setActiveTab('start')"><i class="bi bi-compass me-1"></i>Start here</button>
+            <button class="dashboard-tab" type="button" role="tab" id="tab-monitor" :aria-selected="activeTab === 'monitor'" aria-controls="panel-monitor" @click="setActiveTab('monitor')"><i class="bi bi-folder2-open me-1"></i>Monitor files</button>
+            <button class="dashboard-tab" type="button" role="tab" id="tab-benchmark" :aria-selected="activeTab === 'benchmark'" aria-controls="panel-benchmark" @click="setActiveTab('benchmark')"><i class="bi bi-bar-chart me-1"></i>Offline SILRAD benchmark</button>
+            <button class="dashboard-tab" type="button" role="tab" id="tab-alerts" :aria-selected="activeTab === 'alerts'" aria-controls="panel-alerts" @click="setActiveTab('alerts')"><i class="bi bi-bell me-1"></i>Alerts</button>
+            <button class="dashboard-tab" type="button" role="tab" id="tab-account" :aria-selected="activeTab === 'account'" aria-controls="panel-account" @click="setActiveTab('account')"><i class="bi bi-gear me-1"></i>Email & history</button>
         </nav>
 
         <section id="panel-start" role="tabpanel" aria-labelledby="tab-start" x-show="activeTab === 'start'" x-cloak>
@@ -466,10 +466,17 @@
 
 {% block scripts %}
 <script>
+    const monitorDashboardTabs = ['start', 'monitor', 'benchmark', 'alerts', 'account'];
+
     function monitorDashboard() {
+        const tabFromLocation = () => {
+            const tab = window.location.hash.slice(1);
+            return monitorDashboardTabs.includes(tab) ? tab : 'start';
+        };
         return {
             csrfToken: document.querySelector('meta[name="csrf-token"]').content,
-            activeTab: 'start',
+            activeTab: tabFromLocation(),
+            locationChangeHandler: null,
             busy: false,
             feedback: '',
             feedbackType: 'info',
@@ -533,11 +540,29 @@
             syntheticValidationError: '',
             quarantineExcludedExtensionsText: '',
             quarantineExcludedPathsText: '',
+            setActiveTab(tab) {
+                if (!monitorDashboardTabs.includes(tab)) return;
+                this.activeTab = tab;
+                const nextUrl = new URL(window.location.href);
+                nextUrl.hash = tab === 'start' ? '' : tab;
+                if (nextUrl.href !== window.location.href) {
+                    window.history.pushState({dashboardTab: tab}, '', nextUrl);
+                }
+            },
+            syncActiveTabFromLocation() {
+                this.activeTab = tabFromLocation();
+            },
             init() {
+                this.locationChangeHandler = () => this.syncActiveTabFromLocation();
+                window.addEventListener('popstate', this.locationChangeHandler);
+                window.addEventListener('hashchange', this.locationChangeHandler);
+                this.syncActiveTabFromLocation();
                 this.refreshAll();
                 this.refreshTimer = window.setInterval(() => this.refreshAll(false), 3000);
             },
             destroy() {
+                window.removeEventListener('popstate', this.locationChangeHandler);
+                window.removeEventListener('hashchange', this.locationChangeHandler);
                 window.clearInterval(this.refreshTimer);
                 this.stopFolderWatch();
             },
