@@ -1,6 +1,5 @@
 [CmdletBinding()]
 param(
-    [string]$TargetPath,
     [string]$PolicyPath,
     [ValidateSet('guided', 'random', 'create-modify', 'delete-burst', 'mixed-burst')]
     [string]$Scenario = 'guided',
@@ -38,40 +37,25 @@ if (Test-Path -LiteralPath $runtimeSettingsPath -PathType Leaf) {
     }
 }
 
-$defaultTarget = Read-Setting 'MONITOR_TARGET_PATH' 'instance/monitor_target'
+$dotenvTarget = $null
+$envFile = Join-Path $projectRoot '.env'
+if (Test-Path -LiteralPath $envFile) {
+    $match = Select-String -LiteralPath $envFile -Pattern '^\s*MONITOR_TARGET_PATH\s*=\s*(.*?)\s*$' | Select-Object -First 1
+    if ($match) { $dotenvTarget = $match.Matches[0].Groups[1].Value.Trim().Trim('"').Trim("'") }
+}
+$defaultTarget = $dotenvTarget
+if (-not $defaultTarget) { $defaultTarget = Read-Setting 'MONITOR_TARGET_PATH' 'instance/monitor_target' }
 if (-not [IO.Path]::IsPathRooted($defaultTarget)) {
     $defaultTarget = Join-Path $projectRoot $defaultTarget
 }
 $defaultTarget = [IO.Path]::GetFullPath($defaultTarget)
-$settingsSource = 'environment and saved settings'
-if ($runtimeSettings -and $runtimeSettings.target_path) {
-    $defaultTarget = [IO.Path]::GetFullPath([string]$runtimeSettings.target_path)
-    $settingsSource = 'effective application settings'
-}
-$pathSettings = Read-Setting 'MONITOR_PATH_SETTINGS_PATH' 'instance/monitor_target.json'
-if (-not [IO.Path]::IsPathRooted($pathSettings)) { $pathSettings = Join-Path $projectRoot $pathSettings }
-$pathSettings = [IO.Path]::GetFullPath($pathSettings)
-if (-not $TargetPath -and -not ($runtimeSettings -and $runtimeSettings.target_path) -and (Test-Path -LiteralPath $pathSettings -PathType Leaf)) {
-    try {
-        $savedPath = Get-Content -LiteralPath $pathSettings -Raw | ConvertFrom-Json
-        $environmentTarget = [string]$savedPath.environment_target
-        if ($environmentTarget -and [IO.Path]::GetFullPath($environmentTarget) -ieq $defaultTarget -and $savedPath.target_path) {
-            $defaultTarget = [IO.Path]::GetFullPath([string]$savedPath.target_path)
-        }
-    } catch {
-        throw "Could not read saved monitoring folder from '$pathSettings': $($_.Exception.Message)"
-    }
-}
-if (-not $TargetPath -and -not $NoPrompts) {
-    $enteredPath = Read-Host "Enter the server folder watched by RansomShield, or press ENTER for $defaultTarget"
-    if ($enteredPath) { $TargetPath = $enteredPath }
-}
-if (-not $TargetPath) { $TargetPath = $defaultTarget }
-$TargetPath = [IO.Path]::GetFullPath($TargetPath)
+$TargetPath = $defaultTarget
+$pathSettingsSource = if ($dotenvTarget) { '.env MONITOR_TARGET_PATH' } else { 'MONITOR_TARGET_PATH fallback' }
+$policySettingsSource = 'environment and saved policy settings'
 
 if (-not $PolicyPath -and $runtimeSettings -and $runtimeSettings.policy_path) {
     $PolicyPath = [string]$runtimeSettings.policy_path
-    $settingsSource = 'effective application settings'
+    $policySettingsSource = 'effective application settings'
 }
 if (-not $PolicyPath) { $PolicyPath = Read-Setting 'MONITOR_POLICY_PATH' 'instance/monitor_policy.json' }
 if (-not [IO.Path]::IsPathRooted($PolicyPath)) {
@@ -104,6 +88,7 @@ if (Test-Path -LiteralPath $policyFile -PathType Leaf) {
     Write-Host "No saved monitor policy found at $policyFile; using default limits."
 }
 if ($runtimeSettings -and $runtimeSettings.policy) {
+    $policySettingsSource = 'effective application settings'
     foreach ($key in @($policy.Keys)) {
         $value = $runtimeSettings.policy.$key
         if ($null -ne $value) {
@@ -117,6 +102,8 @@ if ($policy.auto_quarantine) { $quarantineMode = 'active' }
 if ($runtimeSettings -and $runtimeSettings.quarantine_mode) {
     $quarantineMode = [string]$runtimeSettings.quarantine_mode
 }
+if ($quarantineMode -eq 'enabled') { $quarantineMode = 'active' }
+if ($quarantineMode -eq 'dry_run') { $quarantineMode = 'dry-run' }
 
 if (-not (Test-Path -LiteralPath $TargetPath -PathType Container)) {
     throw "The watched server folder does not exist: $TargetPath"
@@ -169,8 +156,17 @@ if ($Scenario -eq 'guided') {
     Write-Host "Safe demo folder: $demoFolder"
     Write-Host "Alert window: $($policy.window_seconds) seconds"
     Write-Host "Limits: delete $($policy.delete_threshold), modify $($policy.modify_threshold), mixed $($policy.mixed_threshold), minimum modified/deleted $($policy.mixed_destructive_minimum)"
-    Write-Host "Settings source: $settingsSource"
+    Write-Host "Path source: $pathSettingsSource"
+    Write-Host "Policy settings source: $policySettingsSource"
+    Write-Host "Automatic quarantine mode: $quarantineMode"
     Write-Host 'All changes stay inside the new demo folder.'
+    if ($quarantineMode -eq 'active') {
+        Write-Host 'Threshold alerts can move changed demo files into quarantine; restore them from Email & history after reviewing.' -ForegroundColor Yellow
+    } elseif ($quarantineMode -eq 'dry-run') {
+        Write-Host 'Dry-run records the quarantine result but leaves files in the demo folder.' -ForegroundColor Yellow
+    } else {
+        Write-Host 'Automatic quarantine is off; alerts will not move files.' -ForegroundColor Yellow
+    }
     Write-Host 'Create-only and below-limit stages still appear in Recent activity but may not create alerts. Threshold stages should alert if monitoring is active and the alert cooldown has expired.'
     Write-Host "Planned steps: create $initialCount; modify $fewModifyCount; modify $moreModifyCount; create $createAgainCount; delete $deleteCount; mixed $mixedCount."
     if (-not $NoPrompts) {
@@ -234,7 +230,7 @@ $availableScenarios = @('create-modify', 'delete-burst', 'mixed-burst')
 if ($Scenario -eq 'random') { $Scenario = Get-Random -InputObject $availableScenarios }
 switch ($Scenario) {
     'create-modify' {
-        $operationCount = [Math]::Min(5000, $policy.modify_threshold + (Get-Random -Minimum 1 -Maximum 4))
+        $operationCount = [Math]::Min(5000, [Math]::Max(1, $policy.modify_threshold))
         $destructiveCount = $operationCount
     }
     'delete-burst' {
@@ -263,7 +259,8 @@ Write-Host "Random case: $Scenario"
 Write-Host "Files/operations: $operationCount"
 Write-Host "Alert window: $($policy.window_seconds) seconds"
 Write-Host "Limits: delete $($policy.delete_threshold), modify $($policy.modify_threshold), mixed $($policy.mixed_threshold), minimum modified/deleted $($policy.mixed_destructive_minimum)"
-Write-Host "Settings source: $settingsSource"
+Write-Host "Path source: $pathSettingsSource"
+Write-Host "Policy settings source: $policySettingsSource"
 Write-Host "Policy loaded from: $policyFile"
 Write-Host "Automatic quarantine mode: $quarantineMode"
 if (-not $NoPrompts) {

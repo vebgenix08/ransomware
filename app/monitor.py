@@ -137,10 +137,7 @@ class MonitoringService:
             "last_activity": {},
         }
         self.policy_path: Optional[Path] = None
-        self.path_settings_path: Optional[Path] = None
         self.runtime_settings_path: Optional[Path] = None
-        self.path_environment_value = ""
-        self.allowed_roots = []
         self.policy = {
             "window_seconds": int(ACTIVITY_WINDOW_SECONDS),
             "delete_threshold": DELETE_ALERT_THRESHOLD,
@@ -149,7 +146,6 @@ class MonitoringService:
             "mixed_destructive_minimum": MIN_DESTRUCTIVE_CHANGES,
             "auto_quarantine": False,
             "auto_quarantine_max_files": 20,
-            "auto_quarantine_max_file_mb": 50,
             "auto_quarantine_excluded_extensions": [],
             "auto_quarantine_excluded_paths": [],
         }
@@ -163,28 +159,6 @@ class MonitoringService:
         if not configured_target.is_absolute():
             configured_target = project_root / configured_target
         configured_target = configured_target.resolve()
-        self.path_environment_value = str(configured_target)
-        configured_dotenv_target = Path(app.config.get("MONITOR_ENV_TARGET_PATH") or configured_target)
-        if not configured_dotenv_target.is_absolute():
-            configured_dotenv_target = project_root / configured_dotenv_target
-        self.dotenv_target_value = str(configured_dotenv_target.resolve())
-        configured_roots = app.config.get("MONITOR_ALLOWED_ROOTS")
-        if isinstance(configured_roots, str):
-            configured_roots = [value.strip() for value in configured_roots.split(os.pathsep) if value.strip()]
-        if configured_roots:
-            roots = [Path(value) for value in configured_roots]
-            self.allowed_roots = [(root if root.is_absolute() else project_root / root).resolve() for root in roots]
-        else:
-            default_root = configured_target.parent
-            # A volume root is too broad as an implicit allowlist.
-            if default_root == Path(default_root.anchor):
-                default_root = configured_target
-            self.allowed_roots = [default_root]
-        configured_path_settings = app.config.get("MONITOR_PATH_SETTINGS_PATH")
-        self.path_settings_path = (Path(configured_path_settings) if configured_path_settings else
-                                   None if app.testing else Path(app.instance_path) / "monitor_target.json")
-        if self.path_settings_path and not self.path_settings_path.is_absolute():
-            self.path_settings_path = project_root / self.path_settings_path
         configured_runtime_settings = app.config.get("MONITOR_RUNTIME_SETTINGS_PATH")
         self.runtime_settings_path = (
             Path(configured_runtime_settings) if configured_runtime_settings
@@ -192,20 +166,8 @@ class MonitoringService:
         )
         if self.runtime_settings_path and not self.runtime_settings_path.is_absolute():
             self.runtime_settings_path = project_root / self.runtime_settings_path
-        self.target_path = configured_target
-        self.target_path.mkdir(parents=True, exist_ok=True)
-        if self.path_settings_path and self.path_settings_path.exists():
-            try:
-                saved_target = json.loads(self.path_settings_path.read_text(encoding="utf-8"))
-                saved_origin = str(saved_target.get("environment_target", ""))
-                saved_dotenv_origin = str(saved_target.get("dotenv_target", saved_origin))
-                selected = Path(saved_target.get("target_path", ""))
-                if (saved_origin and os.path.normcase(saved_origin) == os.path.normcase(self.path_environment_value)
-                        and os.path.normcase(saved_dotenv_origin) == os.path.normcase(self.dotenv_target_value)
-                        and selected.is_dir()):
-                    self.target_path = self.validate_target_path(selected)
-            except (OSError, ValueError, TypeError, json.JSONDecodeError):
-                pass
+        configured_target.mkdir(parents=True, exist_ok=True)
+        self.target_path = self.validate_configured_target(configured_target)
         app.config["MONITOR_TARGET_PATH"] = str(self.target_path)
         configured_policy_path = app.config.get("MONITOR_POLICY_PATH")
         if configured_policy_path:
@@ -244,7 +206,6 @@ class MonitoringService:
         if not self.runtime_settings_path:
             return
         payload = {
-            "target_path": str(self.target_path),
             "policy_path": str(self.policy_path) if self.policy_path else "",
             "policy": dict(self.policy),
             "auto_quarantine": bool(self.app.config.get("AUTO_QUARANTINE", False)),
@@ -277,7 +238,6 @@ class MonitoringService:
             "mixed_destructive_minimum": bounded_int("mixed_destructive_minimum", 1, 5000),
             "auto_quarantine": value.get("auto_quarantine"),
             "auto_quarantine_max_files": bounded_int("auto_quarantine_max_files", 1, 100),
-            "auto_quarantine_max_file_mb": bounded_int("auto_quarantine_max_file_mb", 1, 500),
             "auto_quarantine_excluded_extensions": value.get("auto_quarantine_excluded_extensions", defaults["auto_quarantine_excluded_extensions"]),
             "auto_quarantine_excluded_paths": value.get("auto_quarantine_excluded_paths", defaults["auto_quarantine_excluded_paths"]),
         }
@@ -306,64 +266,18 @@ class MonitoringService:
             policy[name] = sorted(set(cleaned))
         return policy
 
-    def validate_target_path(self, value) -> Path:
+    def validate_configured_target(self, value) -> Path:
         candidate = Path(value).expanduser().resolve(strict=True)
         if not candidate.is_dir():
-            raise ValueError("Choose an existing folder on the monitoring server.")
+            raise ValueError("MONITOR_TARGET_PATH must point to an existing folder on the app server.")
         if candidate == Path(candidate.anchor) or candidate == Path(self.app.root_path).parent.resolve():
-            raise ValueError("Choose a data folder, not a drive root or the application folder.")
-        exact_configured_targets = {os.path.normcase(self.path_environment_value),
-                                    os.path.normcase(self.dotenv_target_value)}
-        is_configured_default = os.path.normcase(str(candidate)) in exact_configured_targets
-        if not is_configured_default and not any(candidate != root and root in candidate.parents for root in self.allowed_roots):
-            roots = ", ".join(str(root) for root in self.allowed_roots)
-            raise ValueError(f"Folder must be inside an allowed monitoring location: {roots}")
+            raise ValueError("MONITOR_TARGET_PATH must be a data folder, not a drive root or the application folder.")
         quarantine = Path(self.app.config["QUARANTINE_PATH"]).expanduser().resolve()
         if candidate == quarantine or candidate in quarantine.parents or quarantine in candidate.parents:
-            raise ValueError("The monitored folder and quarantine folder must be separate.")
+            raise ValueError("MONITOR_TARGET_PATH and the quarantine folder must be separate.")
         if not os.access(candidate, os.R_OK):
-            raise ValueError("The application cannot read this folder.")
+            raise ValueError("The application cannot read the folder configured in MONITOR_TARGET_PATH.")
         return candidate
-
-    def set_target_path(self, value) -> Path:
-        if self.is_running:
-            raise RuntimeError("Stop monitoring before changing the server folder.")
-        candidate = self.validate_target_path(value)
-        if self.policy["auto_quarantine"] and self.app.config.get("QUARANTINE_MODE") != "dry-run":
-            self._validate_quarantine_ready(candidate)
-        if self.path_settings_path:
-            self.path_settings_path.parent.mkdir(parents=True, exist_ok=True)
-            payload = {"target_path": str(candidate), "environment_target": self.path_environment_value,
-                       "dotenv_target": self.dotenv_target_value}
-            temporary = self.path_settings_path.with_suffix(".tmp")
-            temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-            os.replace(temporary, self.path_settings_path)
-        self.target_path = candidate
-        self.app.config["MONITOR_TARGET_PATH"] = str(candidate)
-        self._write_runtime_settings()
-        return candidate
-
-    def reset_target_path(self) -> Path:
-        if self.is_running:
-            raise RuntimeError("Stop monitoring before changing the server folder.")
-        target = self.validate_target_path(self.dotenv_target_value)
-        if self.policy["auto_quarantine"] and self.app.config.get("QUARANTINE_MODE") != "dry-run":
-            self._validate_quarantine_ready(target)
-        if self.path_settings_path:
-            if os.path.normcase(str(target)) == os.path.normcase(self.path_environment_value):
-                if self.path_settings_path.exists():
-                    self.path_settings_path.unlink()
-            else:
-                self.path_settings_path.parent.mkdir(parents=True, exist_ok=True)
-                payload = {"target_path": str(target), "environment_target": self.path_environment_value,
-                           "dotenv_target": self.dotenv_target_value}
-                temporary = self.path_settings_path.with_suffix(".tmp")
-                temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-                os.replace(temporary, self.path_settings_path)
-        self.target_path = target
-        self.app.config["MONITOR_TARGET_PATH"] = str(target)
-        self._write_runtime_settings()
-        return target
 
     def _validate_quarantine_ready(self, monitored_root=None) -> None:
         """Fail closed before enabling real file moves if paths are unsafe or incompatible."""
@@ -395,7 +309,7 @@ class MonitoringService:
         # Saving the dashboard switch explicitly opts into real file moves.
         # Environment-level AUTO_QUARANTINE can still be paired with dry-run.
         if enable_real_quarantine:
-            self.app.config["QUARANTINE_MODE"] = "enabled"
+            self.app.config["QUARANTINE_MODE"] = "active"
 
     def update_policy(self, values: dict) -> dict:
         policy = self.validate_policy(values)
@@ -480,7 +394,6 @@ class MonitoringService:
             "quarantine_mode": ("off" if not self.app.config["AUTO_QUARANTINE"] else
                                 "dry-run" if self.app.config.get("QUARANTINE_MODE") == "dry-run" else "active"),
             "policy": dict(self.policy),
-            "allowed_roots": [str(root) for root in self.allowed_roots],
             **metrics,
         }
 

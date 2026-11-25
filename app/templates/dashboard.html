@@ -114,7 +114,10 @@
         </section>
 
         <section id="panel-monitor" role="tabpanel" aria-labelledby="tab-monitor" x-show="activeTab === 'monitor'" x-cloak>
-        <div class="dashboard-section-heading mb-3"><div><span class="dashboard-section-kicker">File monitoring</span><h2 class="h4">Monitor files</h2><p class="small muted">Choose a folder on this computer or the app server.</p></div></div>
+        <div class="monitor-page-heading">
+            <div><span class="dashboard-section-kicker">File monitoring</span><h2 class="h4 mb-1">Monitor files</h2><p class="small muted mb-0">Choose a folder source, review its status, and manage alert rules.</p></div>
+            <span class="state-badge" :class="status.running ? 'running' : ''"><span class="state-dot"></span><span x-text="status.running ? 'Server monitor running' : 'Server monitor stopped'"></span></span>
+        </div>
         <div class="row g-4 mb-4">
             <div class="col-lg-6">
                 <section class="panel p-4 h-100" aria-labelledby="device-folder-heading">
@@ -146,6 +149,7 @@
                     <h3 id="server-monitor-heading" class="h5 mt-1">Watch the server folder</h3>
                     <p class="small muted">This watches the folder on the computer running the app. It is not the folder picker for this device.</p>
                     <div class="safe-note mb-3"><span class="small muted d-block">Folder being watched</span><code class="text-break" style="color:var(--text)" x-text="status.target"></code></div>
+                    <p class="small muted">To change this folder, edit <code>MONITOR_TARGET_PATH</code> in the project’s <code>.env</code> file, then restart RansomShield.</p>
                     <div class="d-flex flex-wrap align-items-center gap-2">
                         <button class="btn-brand" type="button" @click="startMonitor" :disabled="busy || status.running"><i class="bi bi-play-fill me-2"></i>Start server monitor</button>
                         <button class="btn-outline-custom" type="button" @click="stopMonitor" :disabled="busy || !status.running"><i class="bi bi-stop-fill me-2"></i>Stop server monitor</button>
@@ -160,31 +164,21 @@
                 </section>
             </div>
         </div>
-        <section class="panel p-4 mb-4" aria-labelledby="monitor-policy-heading">
-            <div class="dashboard-section-heading mb-3"><div><span class="dashboard-section-kicker">Live monitoring settings</span><h3 id="monitor-policy-heading" class="h5">Alert limits and quarantine</h3><p class="small muted">These limits apply to live server, browser-folder, and endpoint alerts. Each path is counted once per operation type in the time window. Alerts have a 60-second cooldown. Stop the server monitor before changing shared settings.</p></div></div>
-            <form @submit.prevent="saveMonitorPath" class="border rounded p-3 mb-3">
-                <div class="row g-2 align-items-end">
-                    <label class="col-12 col-lg-8 small">Server folder path<input class="form-control mt-1" type="text" x-model="monitorPathValue" @input="monitorPathDirty=true" placeholder="Absolute path on the computer running RansomShield" :disabled="status.running || status.settings_locked || busy" required></label>
-                    <div class="col-12 col-lg-4 d-flex gap-2"><button class="btn-outline-custom flex-grow-1" type="submit" :disabled="status.running || status.settings_locked || busy">Save folder</button><button class="btn-outline-custom" type="button" @click="resetMonitorPath" :disabled="status.running || status.settings_locked || busy">Use .env path</button></div>
-                </div>
-                <p class="small muted mt-2 mb-1">The folder must already exist and be inside an allowed location, or exactly match the configured <code>MONITOR_TARGET_PATH</code>. Allowed locations: <span x-text="(status.allowed_roots || []).join(' · ') || 'Loading…'"></span></p>
-                <p class="small muted mb-0">The saved folder is shared by the server monitor and demo script. Changing <code>MONITOR_TARGET_PATH</code> in <code>.env</code> overrides this selection after restart.</p>
-                <p class="small text-warning mt-2 mb-0" x-show="status.settings_locked">Another account is using the shared monitor. Stop it from that account before changing its path or limits.</p>
-            </form>
+        <section class="panel monitor-policy mb-4" aria-labelledby="monitor-policy-heading">
+            <div class="monitor-policy-heading"><div><span class="dashboard-section-kicker">Live monitoring settings</span><h3 id="monitor-policy-heading" class="h5 mt-1 mb-1">Alert limits and quarantine</h3><p class="small muted mb-0">Rules apply across live folder and endpoint monitoring. Stop the server monitor before changing shared settings.</p></div><span class="policy-cooldown"><i class="bi bi-clock-history me-1"></i>60-second cooldown</span></div>
             <form @submit.prevent="saveMonitorPolicy" class="row g-3 align-items-end">
-                <label class="col-6 col-lg-2 small">Time window (seconds)<input class="form-control mt-1" type="number" min="5" max="300" x-model.number="monitorPolicy.window_seconds" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label>
-                <label class="col-6 col-lg-2 small">Deletion limit<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.delete_threshold" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label>
-                <label class="col-6 col-lg-2 small">Modification limit<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.modify_threshold" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label>
-                <label class="col-6 col-lg-2 small">Total changes limit<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.mixed_threshold" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label>
-                <label class="col-6 col-lg-2 small">Minimum deletes or edits<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.mixed_destructive_minimum" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label>
-                <div class="col-12 col-lg-2"><button class="btn-outline-custom w-100" type="submit" :disabled="status.running || status.settings_locked || busy">Save settings</button></div>
-                <div class="col-12">
-                    <label class="d-flex align-items-start gap-2"><input type="checkbox" class="form-check-input mt-1" x-model="monitorPolicy.auto_quarantine" @change="policyDirty=true" :disabled="status.running || status.settings_locked || busy"><span><strong>Automatically quarantine changed files when an alert triggers</strong><span class="small muted d-block">Files move immediately when the server-folder rule triggers. Review the affected-file list in the alert; future changes cannot be previewed in advance. Deleted files cannot be moved.</span></span></label>
+                <div class="col-6 col-lg-4"><label class="small w-100">Time window (seconds)<input class="form-control mt-1" type="number" min="5" max="300" x-model.number="monitorPolicy.window_seconds" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label></div>
+                <div class="col-6 col-lg-4"><label class="small w-100">Deletion limit<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.delete_threshold" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label></div>
+                <div class="col-6 col-lg-4"><label class="small w-100">Modification limit<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.modify_threshold" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label></div>
+                <div class="col-6 col-lg-4"><label class="small w-100">Total changes limit<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.mixed_threshold" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label></div>
+                <div class="col-6 col-lg-4"><label class="small w-100">Minimum deletes or edits<input class="form-control mt-1" type="number" min="1" max="5000" x-model.number="monitorPolicy.mixed_destructive_minimum" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy" required></label></div>
+                <div class="col-6 col-lg-4"><button class="btn-outline-custom w-100" type="submit" :disabled="status.running || status.settings_locked || busy">Save settings</button></div>
+                <div class="col-12"><div class="quarantine-settings">
+                    <label class="quarantine-toggle"><input type="checkbox" class="form-check-input mt-1" x-model="monitorPolicy.auto_quarantine" @change="policyDirty=true" :disabled="status.running || status.settings_locked || busy"><span><strong>Automatically quarantine changed files</strong><span class="small muted d-block">When a server-folder alert triggers, eligible files move immediately. Deleted files cannot be moved.</span></span></label>
                     <div class="row g-3 mt-1">
-                        <label class="col-6 col-lg-3 small">Maximum files per alert<input class="form-control mt-1" type="number" min="1" max="100" x-model.number="monitorPolicy.auto_quarantine_max_files" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy"></label>
-                        <label class="col-6 col-lg-3 small">Maximum file size (MB)<input class="form-control mt-1" type="number" min="1" max="500" x-model.number="monitorPolicy.auto_quarantine_max_file_mb" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy"></label>
-                        <label class="col-12 col-lg-3 small">Excluded extensions<input class="form-control mt-1" type="text" x-model="quarantineExcludedExtensionsText" @input="policyDirty=true" placeholder=".tmp, .log" :disabled="status.running || status.settings_locked || busy"><span class="muted">Comma separated</span></label>
-                        <label class="col-12 col-lg-3 small">Excluded relative folders<input class="form-control mt-1" type="text" x-model="quarantineExcludedPathsText" @input="policyDirty=true" placeholder="exports, backups/archive" :disabled="status.running || status.settings_locked || busy"><span class="muted">Comma separated, inside monitored folder</span></label>
+                        <label class="col-12 col-lg-4 small">Maximum files per alert<input class="form-control mt-1" type="number" min="1" max="100" x-model.number="monitorPolicy.auto_quarantine_max_files" @input="policyDirty=true" :disabled="status.running || status.settings_locked || busy"></label>
+                        <label class="col-12 col-lg-4 small">Excluded extensions<input class="form-control mt-1" type="text" x-model="quarantineExcludedExtensionsText" @input="policyDirty=true" placeholder=".tmp, .log" :disabled="status.running || status.settings_locked || busy"><span class="muted">Comma separated</span></label>
+                        <label class="col-12 col-lg-4 small">Excluded relative folders<input class="form-control mt-1" type="text" x-model="quarantineExcludedPathsText" @input="policyDirty=true" placeholder="exports, backups/archive" :disabled="status.running || status.settings_locked || busy"><span class="muted">Comma separated, inside monitored folder</span></label>
                     </div>
                     <details class="small mt-2" x-show="monitorPolicy.auto_quarantine && latestServerFolderAlert()">
                         <summary>Preview files from the latest server-folder alert</summary>
@@ -194,8 +188,8 @@
                     <p class="small muted mt-2 mb-0">Restore location: <code x-text="status.quarantine_location || 'Loading…'"></code>. Selected-folder files still require a manual action.</p>
                     <p class="small muted mt-1 mb-0">Current mode: <strong x-text="status.quarantine_mode || 'Loading…'"></strong></p>
                     <p class="small text-warning mt-1 mb-0" x-show="status.quarantine_mode === 'dry-run'">Dry-run records what would be moved but leaves files in place. Saving automatic quarantine from this page switches to active moves.</p>
-                    <p class="small text-danger mt-2 mb-0">Automatic quarantine is an immediate file move, not a harmless preview. Use a test folder first and exclude important folders.</p>
-                </div>
+                    <p class="quarantine-warning small mt-3 mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Automatic quarantine moves files immediately. Test with a safe folder and exclude important folders.</p>
+                </div></div>
             </form>
             <div class="mt-3 d-flex flex-wrap align-items-center gap-2">
                 <button type="button" class="btn-outline-custom" @click="simulatePolicy" :disabled="busy">Replay saved activity (unlabeled)</button>
@@ -283,28 +277,28 @@
         </section>
 
         <div x-show="activeTab === 'monitor'" x-cloak>
-        <section class="panel mb-4">
-                    <div class="p-4 d-flex justify-content-between align-items-start border-bottom" style="border-color:var(--line)!important">
-                        <div><small class="muted">RECORDED FILE CHANGES</small><h2 id="events-heading" class="h4 mt-1 mb-1">Recent activity</h2><span class="muted small">A recorded file change is not a confirmed threat. Updated automatically every few seconds.</span></div>
+        <section class="panel activity-panel mb-4">
+                    <div class="activity-heading">
+                        <div><small class="muted">RECORDED FILE CHANGES</small><h2 id="events-heading" class="h4 mt-1 mb-1">Recent activity</h2><span class="muted small">File changes are activity signals, not confirmed threats. Refreshes automatically.</span></div>
                         <button class="theme-toggle" type="button" @click="refreshAll" :disabled="busy" aria-label="Refresh data"><i class="bi bi-arrow-clockwise" :class="busy ? 'd-inline-block spin' : ''"></i></button>
                     </div>
 
-                    <div class="p-3 border-bottom d-flex flex-wrap align-items-end gap-2" style="border-color:var(--line)!important">
+                    <div class="activity-filters">
                         <label class="small">Device <select class="form-select form-select-sm" x-model="activityFilters.device" @change="loadEvents"><option value="">All devices</option><template x-for="device in devices" :key="device.device_id"><option :value="device.device_id" x-text="device.label"></option></template></select></label>
                         <label class="small">Source <select class="form-select form-select-sm" x-model="activityFilters.source" @change="loadEvents"><option value="">All sources</option><option value="poll">Server folder</option><option value="browser">Browser folder</option><option value="agent">Windows agent</option></select></label>
                         <label class="small">Action <select class="form-select form-select-sm" x-model="activityFilters.action" @change="loadEvents"><option value="">All actions</option><option value="created">Created</option><option value="modified">Modified</option><option value="deleted">Deleted</option></select></label>
                         <a class="btn-outline-custom btn-sm text-decoration-none" :href="activityExportUrl()">Export CSV</a>
                     </div>
 
-                    <div class="px-4" x-show="events.length">
+                    <div class="activity-list" x-show="events.length">
                         <template x-for="event in events" :key="event.id">
-                            <article class="feed-row">
+                            <article class="activity-event">
                                 <span class="feed-icon" :class="event.severity"><i class="bi" :class="event.severity === 'warning' ? 'bi-exclamation-triangle' : 'bi-folder-check'"></i></span>
                                 <div class="activity-event-content">
-                                    <strong class="d-block" x-text="event.event_type === 'file_activity' ? 'File activity recorded' : event.event_type.replaceAll('_', ' ')"></strong>
+                                    <div class="activity-event-top"><div><strong x-text="event.event_type === 'file_activity' ? 'File activity recorded' : event.event_type.replaceAll('_', ' ')"></strong><span class="activity-source" x-text="event.source === 'agent' ? 'Windows endpoint' : event.source === 'browser' ? 'Browser folder' : 'Server folder'"></span></div><span class="muted activity-time" x-text="formatDate(event.created_at)"></span></div>
                                     <p class="muted small mb-2" x-text="eventSummary(event)"></p>
-                                    <p class="small muted mb-2" x-show="event.source === 'agent'">Windows endpoint agent</p>
-                                    <div class="activity-file-list" x-show="eventFiles(event).length">
+                                    <details class="activity-file-list" x-show="eventFiles(event).length">
+                                        <summary><span>View changed files</span><span class="activity-file-count" x-text="eventFiles(event).length"></span></summary>
                                         <div class="activity-file-heading"><span>Action</span><span>File path (inside monitored folder)</span></div>
                                         <template x-for="file in eventFiles(event).slice(0, 10)" :key="`${file.operation}:${file.path}`">
                                             <div class="activity-file-row">
@@ -322,8 +316,7 @@
                                             </template>
                                         </details>
                                         <p class="activity-truncation-note" x-show="eventUsesLegacyFormat(event) && event.details.length >= 500">This older event was cut off when it was saved, so the list may not include every changed file.</p>
-                                    </div>
-                                    <span class="muted d-block mt-2" style="font-size:.72rem" x-text="formatDate(event.created_at)"></span>
+                                    </details>
                                 </div>
                                 <span class="state-badge" x-text="event.severity === 'warning' ? 'Review activity' : 'Recorded'"></span>
                             </article>
@@ -337,15 +330,18 @@
         </div>
 
         <section id="panel-alerts" role="tabpanel" aria-labelledby="tab-alerts" x-show="activeTab === 'alerts'" x-cloak>
-        <section class="panel">
-            <div class="p-4 border-bottom d-flex flex-wrap justify-content-between align-items-center gap-2" style="border-color:var(--line)!important"><div><small class="muted">ALERT REVIEW</small><h2 id="alerts-heading" class="h4 mt-1 mb-0">Detected activity alerts</h2></div><div class="d-flex gap-2"><label class="small">State <select class="form-select form-select-sm d-inline-block w-auto ms-1" x-model="alertFilter" @change="loadAlerts"><option value="open">Open</option><option value="resolved">Resolved</option><option value="all">All</option></select></label><label class="small">Severity <select class="form-select form-select-sm d-inline-block w-auto ms-1" x-model="severityFilter" @change="loadAlerts"><option value="">All</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option></select></label></div></div>
-            <div class="px-4" x-show="alerts.length">
+        <section class="panel alerts-panel">
+            <div class="alerts-heading"><div><span class="dashboard-section-kicker">Alert review</span><h2 id="alerts-heading" class="h4 mt-1 mb-1">Detected activity alerts</h2><p class="small muted mb-0">Review unusual activity, inspect affected files, and record the response.</p></div><div class="alerts-filters"><label>State<select class="form-select form-select-sm" x-model="alertFilter" @change="loadAlerts"><option value="open">Open</option><option value="resolved">Resolved</option><option value="all">All</option></select></label><label>Severity<select class="form-select form-select-sm" x-model="severityFilter" @change="loadAlerts"><option value="">All</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option></select></label></div></div>
+            <div class="alerts-list" x-show="alerts.length">
                 <template x-for="alert in alerts" :key="alert.id">
-                    <article class="feed-row">
-                        <span class="feed-icon" :class="alert.severity"><i class="bi bi-shield-exclamation"></i></span>
-                        <div>
-                            <strong class="d-block" x-text="alert.title"></strong>
-                            <p class="small mb-1">Incident #<span x-text="alert.id"></span> · <span x-show="isLiveActivityAlert(alert)">Burst intensity <span x-text="alert.risk_score"></span>/100 · heuristic, not a probability.</span><span x-show="!isLiveActivityAlert(alert)">Dataset evaluation flagged records; score <span x-text="alert.risk_score"></span>/100. This refers to the evaluated CSV, not your computer.</span> · <a :href="'/api/alerts/' + alert.id + '/report.csv'">Download CSV</a></p>
+                    <article class="alert-item">
+                        <div class="alert-item-heading">
+                            <span class="alert-icon" :class="`severity-${alert.severity || 'medium'}`"><i class="bi bi-shield-exclamation"></i></span>
+                            <div class="alert-title-group"><strong x-text="alert.title"></strong><div class="alert-meta"><span>Incident #<span x-text="alert.id"></span></span><span class="alert-severity" :class="`severity-${alert.severity || 'medium'}`" x-text="alert.severity || 'Review'"></span><span class="alert-state" :class="alert.resolved_at ? 'resolved' : 'open'" x-text="alert.resolved_at ? 'Resolved' : alert.acknowledged ? 'Reviewed' : 'Open'"></span><a :href="'/api/alerts/' + alert.id + '/report.csv'">Download report</a></div></div>
+                            <div class="alert-actions"><button class="btn-outline-custom btn-sm" type="button" @click="acknowledgeAlert(alert.id)" :disabled="alert.acknowledged || alert.resolved_at" x-text="alert.acknowledged ? 'Reviewed' : 'Acknowledge'"></button><button class="btn-outline-custom btn-sm" type="button" @click="resolveAlert(alert.id)" :disabled="busy || alert.resolved_at" x-text="alert.resolved_at ? 'Resolved' : 'Resolve'"></button></div>
+                        </div>
+                        <div class="alert-content">
+                            <p class="alert-score small mb-1"><span x-show="isLiveActivityAlert(alert)">Burst intensity <strong x-text="alert.risk_score"></strong>/100 · heuristic, not a probability.</span><span x-show="!isLiveActivityAlert(alert)">Dataset evaluation score <strong x-text="alert.risk_score"></strong>/100 · applies to the evaluated data.</span></p>
                             <p class="muted small mb-1" x-text="alert.details"></p>
                             <div class="small mb-2" x-show="alertRuleEvaluation(alert)">
                                 <p class="mb-1" x-text="ruleEvaluationSummary(alertRuleEvaluation(alert))"></p>
@@ -404,9 +400,8 @@
                                     </details>
                                 </div>
                             </template>
-                            <span class="muted" style="font-size:.72rem" x-text="alert.resolved_at ? `Resolved ${formatDate(alert.resolved_at)}` : `Created ${formatDate(alert.created_at)}`"></span>
+                            <span class="muted alert-time" x-text="alert.resolved_at ? `Resolved ${formatDate(alert.resolved_at)}` : `Created ${formatDate(alert.created_at)}`"></span>
                         </div>
-                        <div class="d-flex flex-column gap-2"><button class="btn-outline-custom py-2 px-3" type="button" @click="acknowledgeAlert(alert.id)" :disabled="alert.acknowledged || alert.resolved_at" x-text="alert.acknowledged ? 'Reviewed' : 'Acknowledge'"></button><button class="btn-outline-custom py-2 px-3" type="button" @click="resolveAlert(alert.id)" :disabled="busy || alert.resolved_at" x-text="alert.resolved_at ? 'Resolved' : 'Resolve'"></button></div>
                     </article>
                 </template>
             </div>
@@ -519,7 +514,6 @@
                 mixed_destructive_minimum: 10,
                 auto_quarantine: false,
                 auto_quarantine_max_files: 20,
-                auto_quarantine_max_file_mb: 50,
                 auto_quarantine_excluded_extensions: [],
                 auto_quarantine_excluded_paths: []
             },
@@ -528,8 +522,6 @@
             policySimulationError: '',
             syntheticValidation: null,
             syntheticValidationError: '',
-            monitorPathValue: '',
-            monitorPathDirty: false,
             quarantineExcludedExtensionsText: '',
             quarantineExcludedPathsText: '',
             init() {
@@ -596,7 +588,6 @@
                     ]);
                     const alertData = await this.fetchJson(this.alertQuery());
                     this.status = summary.status;
-                    if (!this.monitorPathDirty) this.monitorPathValue = summary.status.target || '';
                     if (!this.policyDirty && summary.status.policy) {
                         this.monitorPolicy = {...summary.status.policy};
                         this.quarantineExcludedExtensionsText = (summary.status.policy.auto_quarantine_excluded_extensions || []).join(', ');
@@ -921,7 +912,7 @@
                     const extensions = this.quarantineExcludedExtensionsText || 'none';
                     const paths = this.quarantineExcludedPathsText || 'none';
                     const restorePath = this.status.quarantine_location || 'the configured quarantine folder';
-                    const approved = window.confirm(`Enable automatic quarantine?\n\nOn a server-folder alert, files move immediately. The alert will list the affected paths, but future files cannot be previewed before the event.\n\nMaximum: ${this.monitorPolicy.auto_quarantine_max_files} files per alert, ${this.monitorPolicy.auto_quarantine_max_file_mb} MB each.\nExcluded extensions: ${extensions}\nExcluded folders: ${paths}\nRestore from: ${restorePath}\n\nContinue?`);
+                    const approved = window.confirm(`Enable automatic quarantine?\n\nOn a server-folder alert, files move immediately. The alert will list the affected paths, but future files cannot be previewed before the event.\n\nMaximum: ${this.monitorPolicy.auto_quarantine_max_files} files per alert.\nExcluded extensions: ${extensions}\nExcluded folders: ${paths}\nRestore from: ${restorePath}\n\nContinue?`);
                     if (!approved) { this.monitorPolicy.auto_quarantine = false; return; }
                 }
                 const payload = {...this.monitorPolicy,
@@ -938,20 +929,6 @@
                     this.quarantineExcludedExtensionsText = result.policy.auto_quarantine_excluded_extensions.join(', ');
                     this.quarantineExcludedPathsText = result.policy.auto_quarantine_excluded_paths.join(', ');
                 }
-            },
-            async saveMonitorPath() {
-                const result = await this.performAction('/api/monitor/path', {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({target_path: this.monitorPathValue})
-                });
-                if (result?.ok) { this.monitorPathValue = result.target; this.monitorPathDirty = false; }
-            },
-            async resetMonitorPath() {
-                const result = await this.performAction('/api/monitor/path', {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({reset: true})
-                });
-                if (result?.ok) { this.monitorPathValue = result.target; this.monitorPathDirty = false; }
             },
             async simulatePolicy() {
                 this.policySimulationError = '';

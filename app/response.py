@@ -309,7 +309,6 @@ def respond(app, alert, root, affected, quarantine_allowed=True):
         policy = (app.extensions.get("monitoring_service").policy
                   if app.extensions.get("monitoring_service") else {})
         max_files = int(policy.get("auto_quarantine_max_files", 20))
-        max_size = int(policy.get("auto_quarantine_max_file_mb", 50)) * 1024 * 1024
         excluded_extensions = {str(item).lower() for item in policy.get("auto_quarantine_excluded_extensions", [])}
         excluded_paths = [str(item).replace("\\", "/").strip("/").casefold()
                           for item in policy.get("auto_quarantine_excluded_paths", [])]
@@ -345,11 +344,6 @@ def respond(app, alert, root, affected, quarantine_allowed=True):
                     continue
                 target = destination / relative
                 size = source.stat().st_size
-                if size > max_size:
-                    record.update(status="skipped_size_limit", size_bytes=size,
-                                  reason=f"File exceeds the configured {max_size // (1024 * 1024)} MB limit")
-                    result["files"].append(record)
-                    continue
                 if eligible_count >= max_files:
                     record.update(status="skipped_file_limit", size_bytes=size,
                                   reason=f"Alert file limit is {max_files}")

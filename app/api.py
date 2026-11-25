@@ -663,25 +663,6 @@ def update_monitor_policy():
     return jsonify(ok=True, message="Server monitor settings saved.", policy=policy)
 
 
-@api.post("/monitor/path")
-@login_required
-def update_monitor_path():
-    monitor = get_monitor()
-    body = request.get_json(silent=True)
-    if not isinstance(body, dict):
-        return jsonify(ok=False, message="Provide a server folder path."), 400
-    try:
-        target = monitor.reset_target_path() if body.get("reset") is True else monitor.set_target_path(body.get("target_path", ""))
-    except RuntimeError as exc:
-        return jsonify(ok=False, message=str(exc)), 409
-    except (OSError, TypeError, ValueError) as exc:
-        return jsonify(ok=False, message=str(exc)), 422
-    record_audit("monitor_target_changed", target=str(target), reset=body.get("reset") is True)
-    db.session.commit()
-    return jsonify(ok=True, message="Server monitoring folder saved.", target=str(target),
-                   allowed_roots=[str(root) for root in monitor.allowed_roots])
-
-
 @api.post("/monitor/policy/simulate")
 @login_required
 def simulate_monitor_policy():
@@ -1203,7 +1184,7 @@ def retry_alert_email(alert_id: int):
 def list_audit():
     limit = min(max(request.args.get("limit", 50, type=int), 1), 100)
     entries = (AuditLog.query.filter_by(user_id=current_user.id)
-               .order_by(AuditLog.created_at.desc()).limit(limit).all())
+               .order_by(AuditLog.created_at.desc(), AuditLog.id.desc()).limit(limit).all())
     return jsonify(entries=[entry.to_dict() for entry in entries])
 
 

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 from flask import Flask
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 
@@ -50,7 +50,9 @@ def _run_migrations(app: Flask) -> None:
 
 def create_app(test_config: Optional[dict] = None) -> Flask:
     """Create and configure the RansomShield Flask application."""
-    load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False, interpolate=False)
+    env_file = Path(__file__).resolve().parents[1] / ".env"
+    env_file_values = dotenv_values(env_file, interpolate=False)
+    load_dotenv(env_file, override=False, interpolate=False)
     app = Flask(__name__, instance_relative_config=True)
 
     testing = bool(test_config and test_config.get("TESTING"))
@@ -73,6 +75,12 @@ def create_app(test_config: Optional[dict] = None) -> Flask:
         database_uri = "postgresql://" + database_uri[len("postgres://"):]
     if database_uri.startswith("postgresql://"):
         database_uri = "postgresql+psycopg://" + database_uri[len("postgresql://"):]
+    auto_quarantine_setting = env_file_values.get("AUTO_QUARANTINE")
+    if auto_quarantine_setting is None:
+        auto_quarantine_setting = os.environ.get("AUTO_QUARANTINE", "false")
+    quarantine_mode_setting = env_file_values.get("QUARANTINE_MODE")
+    if not quarantine_mode_setting:
+        quarantine_mode_setting = os.environ.get("QUARANTINE_MODE", "dry-run")
     app.config.from_mapping(
         APP_NAME=os.environ.get("APP_NAME", "RansomShield"),
         SECRET_KEY=secret_key,
@@ -86,13 +94,12 @@ def create_app(test_config: Optional[dict] = None) -> Flask:
         SILRAD_DATA_DIR=os.environ.get("SILRAD_DATA_DIR", str(Path(app.instance_path) / "silrad")),
         # Fail closed: automatic quarantine is opt-in and requires validated
         # detection plus a deliberate deployment-level setting.
-        AUTO_QUARANTINE=os.environ.get("AUTO_QUARANTINE", "false").lower() == "true",
-        QUARANTINE_MODE=os.environ.get("QUARANTINE_MODE", "dry-run").lower(),
+        AUTO_QUARANTINE=str(auto_quarantine_setting).lower() == "true",
+        QUARANTINE_MODE=str(quarantine_mode_setting).lower(),
         QUARANTINE_PATH=str(Path(app.instance_path) / "quarantine"),
-        MONITOR_TARGET_PATH=os.environ.get("MONITOR_TARGET_PATH", str(Path(app.instance_path) / "monitor_target")),
-        MONITOR_ENV_TARGET_PATH=os.environ.get("MONITOR_TARGET_PATH", str(Path(app.instance_path) / "monitor_target")),
-        MONITOR_ALLOWED_ROOTS=os.environ.get("MONITOR_ALLOWED_ROOTS", "").strip(),
-        MONITOR_PATH_SETTINGS_PATH=os.environ.get("MONITOR_PATH_SETTINGS_PATH", "").strip() or None,
+        MONITOR_TARGET_PATH=(env_file_values.get("MONITOR_TARGET_PATH") or
+                             os.environ.get("MONITOR_TARGET_PATH") or
+                             str(Path(app.instance_path) / "monitor_target")),
         MONITOR_RUNTIME_SETTINGS_PATH=os.environ.get("MONITOR_RUNTIME_SETTINGS_PATH", "").strip() or None,
         MONITOR_POLICY_PATH=os.environ.get("MONITOR_POLICY_PATH", "").strip() or None,
         RESPONSE_WEBHOOK_URL=os.environ.get("RESPONSE_WEBHOOK_URL", ""),
