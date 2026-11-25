@@ -445,7 +445,9 @@ class MonitoringService:
                     f"High-volume file-change burst across {window_total} distinct files in "
                     f"{policy['window_seconds']} seconds ({len(window_created)} created, "
                     f"{len(window_modified)} modified, {len(window_deleted)} deleted). "
-                    "Review this activity; this rule is an anomaly signal, not a malware verdict."
+                    "This alert reports an unusual file-change pattern. "
+                    "It does not confirm that the files contain malware. "
+                    "Review the affected files before taking action."
                 )
                 burst_score = max(risk_score, 60)
                 severe_burst = (

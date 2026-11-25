@@ -352,7 +352,9 @@ def evaluate_browser_folder_window(folder_id: str, folder_name: str, user_id: in
         "Browser folder file-change burst",
         (f"Browser folder {folder_name} reported {total} distinct file changes in {window_seconds} seconds "
          f"({len(created)} created, {len(modified)} modified, {len(deleted)} deleted). "
-         "Review this activity; this rule is an anomaly signal, not a malware verdict."),
+         "This alert reports an unusual file-change pattern. "
+         "It does not confirm that the files contain malware. "
+         "Review the affected files before taking action."),
         "high" if severe else "medium", max(risk, 60), created | modified | deleted,
         model_version="browser-folder-burst-v1", owner_id=user_id,
         file_activity=[
@@ -413,7 +415,9 @@ def evaluate_agent_window(agent: str, user_id: int) -> bool:
         "Remote endpoint file-change burst",
         (f"Agent {agent} reported {total} distinct file changes in {window_seconds} seconds "
          f"({len(created)} created, {len(modified)} modified, {len(deleted)} deleted). "
-         "Review this activity; this rule is an anomaly signal, not a malware verdict."),
+         "This alert reports an unusual file-change pattern. "
+         "It does not confirm that the files contain malware. "
+         "Review the affected files before taking action."),
         "high" if severe else "medium", max(risk, 60), created | modified | deleted,
         model_version="endpoint-agent-burst-v1",
         owner_id=user_id,

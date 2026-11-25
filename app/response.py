@@ -18,6 +18,20 @@ from .extensions import db
 from .models import QuarantineItem, ResponseAction, User
 
 
+def _quarantine_status_label(status: str) -> str:
+    labels = {
+        "disabled": "Disabled (automatic quarantine is off in settings)",
+        "dry_run": "Dry run (files were not moved)",
+        "not_supported_for_source": "Not supported for this monitoring source",
+        "below_quarantine_threshold": "Not triggered (below quarantine threshold)",
+        "partial_failure": "Partially completed (check individual file results)",
+        "quarantined": "Completed",
+        "manually_quarantined": "Completed manually",
+        "no_files": "No eligible files",
+    }
+    return labels.get(status, status.replace("_", " ").capitalize())
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -62,7 +76,7 @@ def _format_alert_email(alert, result, app_name: str) -> tuple[str, str]:
             "A rolling file-change rule crossed its review threshold.",
             f"Activity score: {alert.risk_score}/100 (heuristic, not a probability)",
             alert.details,
-            "This is an activity anomaly for review, not confirmation of malware.",
+            "File-change alerts identify unusual activity. They do not confirm that files contain malware.",
         ])
     else:
         lines.extend([f"Details: {alert.details}", f"Model or rule: {model_version or 'Not specified'}"])
@@ -79,6 +93,7 @@ def _format_alert_email(alert, result, app_name: str) -> tuple[str, str]:
     lines.extend([
         f"Alert ID: {alert.id}",
         f"Files moved to quarantine: {files_moved}",
+        f"Quarantine status: {_quarantine_status_label(result.get('quarantine', 'not available'))}",
         "Review this alert and its CSV report in the RansomShield dashboard.",
     ])
     if not files_moved:
@@ -120,7 +135,7 @@ def _format_alert_email_html(alert, result, app_name: str) -> str:
             ("Detection rule", model_version),
             ("Observed activity", alert.details or "Not specified"),
         ])
-        note = "This is a file-activity anomaly for review, not confirmation of malware."
+        note = "File-change alerts identify unusual activity. They do not confirm that files contain malware."
     else:
         rows.extend([
             ("Analysis type", "Activity alert"),
@@ -133,7 +148,7 @@ def _format_alert_email_html(alert, result, app_name: str) -> str:
     rows.extend([
         ("Files quarantined", moved),
         ("Quarantine failures", failed),
-        ("Quarantine status", result.get("quarantine", "not available")),
+        ("Quarantine status", _quarantine_status_label(result.get("quarantine", "not available"))),
     ])
     table_rows = "".join(
         "<tr>"

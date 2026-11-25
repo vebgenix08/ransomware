@@ -116,6 +116,31 @@ class ResponseTests(unittest.TestCase):
         self.assertIn("Affected files (paths relative to monitored folder)", html_body)
         self.assertIn("reports/quarterly.xlsx", html_body)
         self.assertIn("notes.txt", html_body)
+        self.assertIn(
+            "File-change alerts identify unusual activity. They do not confirm that files contain malware.",
+            plain_body,
+        )
+        self.assertIn("They do not confirm that files contain malware.", html_body)
+        self.assertNotIn("not a malware verdict", plain_body)
+
+    def test_alert_email_explains_when_automatic_quarantine_is_disabled(self):
+        self.app.config.update(
+            AUTO_QUARANTINE=False,
+            RESPONSE_EMAIL_TO="analyst@example.invalid",
+            RESPONSE_EMAIL_FROM="monitor@example.invalid",
+            SMTP_HOST="smtp.example.invalid",
+        )
+        alert = self.alert()
+        alert.model_version = "rolling-file-burst-v1"
+        db.session.commit()
+        with patch("app.response.smtplib.SMTP") as smtp:
+            respond(self.app, alert, self.monitor.target_path, set())
+            message = smtp.return_value.__enter__.return_value.send_message.call_args.args[0]
+        plain_body = message.get_body(preferencelist=("plain",)).get_content()
+        html_body = message.get_body(preferencelist=("html",)).get_content()
+        expected = "Disabled (automatic quarantine is off in settings)"
+        self.assertIn(expected, plain_body)
+        self.assertIn(expected, html_body)
 
     def test_ssl_email_authentication_and_recipient_refusal(self):
         self.app.config.update(RESPONSE_EMAIL_TO="test@example.invalid", RESPONSE_EMAIL_FROM="sender@example.invalid",
@@ -214,6 +239,8 @@ class ResponseTests(unittest.TestCase):
         alert = Alert.query.one()
         self.assertEqual(alert.title, "High-volume file-change burst")
         self.assertEqual(alert.model_version, "rolling-file-burst-v1")
+        self.assertIn("It does not confirm that the files contain malware.", alert.details)
+        self.assertNotIn("not a malware verdict", alert.details)
         self.assertEqual(alert.rule_trace[-1]["value"], "rolling-file-burst-v1")
         affected_files = next(item["value"] for item in alert.rule_trace if item["signal"] == "affected_files")
         self.assertEqual(len(affected_files), 20)
